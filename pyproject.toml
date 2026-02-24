@@ -1,0 +1,19 @@
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]   # pycodestyle, pyflakes, isort
+ignore = ["E501"]
+
+[tool.aerich]
+tortoise_orm = "config.TORTOISE_ORM"
+location = "./migrations"
+src_folder = "./"
