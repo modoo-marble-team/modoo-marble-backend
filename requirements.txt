@@ -1,3 +1,5 @@
+# NOTE: This file is for reference only. Use `uv sync` with pyproject.toml/uv.lock as the source of truth.
+
 # ── 웹 프레임워크 ─────────────────────────────────────────
 fastapi==0.115.14
 uvicorn[standard]==0.30.6
