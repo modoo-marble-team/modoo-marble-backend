@@ -46,3 +46,9 @@ logs/
 *.tmp
 .mypy_cache/
 .ruff_cache/
+
+# macOS
+.DS_Store
+
+# JetBrains
+*.iml
