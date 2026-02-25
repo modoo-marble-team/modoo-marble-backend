@@ -52,3 +52,6 @@ logs/
 
 # JetBrains
 *.iml
+
+# Pytest temp
+.pytest_tmp/
