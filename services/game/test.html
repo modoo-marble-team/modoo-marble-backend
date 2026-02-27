@@ -1,0 +1,503 @@
+﻿<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>4인 테스트 (Socket.IO)</title>
+    <style>
+      :root {
+        --bg: #f4f1e8;
+        --panel: #ffffff;
+        --ink: #1f2937;
+        --line: #e5e7eb;
+        --point: #0f766e;
+        --warn: #b91c1c;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        color: var(--ink);
+        font-family: "Noto Sans KR", "Malgun Gothic", sans-serif;
+        background: radial-gradient(circle at 10% 10%, #fff8e1 0%, var(--bg) 60%);
+      }
+
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 20px;
+        display: grid;
+        gap: 14px;
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 14px;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 24px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+
+      button,
+      select,
+      input {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 8px 10px;
+        background: #fff;
+        font-size: 14px;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      button.primary {
+        background: var(--point);
+        color: #fff;
+        border-color: var(--point);
+      }
+
+      .status {
+        display: grid;
+        gap: 8px;
+      }
+
+      .status strong {
+        color: var(--point);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        padding: 8px 6px;
+        vertical-align: top;
+      }
+
+      .log {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        max-height: 220px;
+        overflow: auto;
+        display: grid;
+        gap: 6px;
+      }
+
+      .log li {
+        border-left: 3px solid var(--point);
+        background: #f8fafc;
+        padding: 6px 8px;
+        border-radius: 4px;
+        white-space: pre-wrap;
+      }
+
+      .danger {
+        color: var(--warn);
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="panel">
+        <h1>4인 수동 조작 테스트 (Socket.IO)</h1>
+        <div class="status" id="status"></div>
+        <div class="controls">
+          <label for="serverUrlInput">서버 주소</label>
+          <input
+            id="serverUrlInput"
+            style="min-width: 290px"
+            value="http://127.0.0.1:8000"
+          />
+          <label for="diceSelect">주사위</label>
+          <select id="diceSelect">
+            <option value="R">랜덤</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+          </select>
+          <button class="primary" id="rollBtn">굴리기</button>
+          <button id="buyBtn">현재 땅 구매</button>
+          <button id="buildBtn">현재 땅 건설</button>
+          <button id="sellBtn">자산 매각(건물 우선)</button>
+          <button id="endBtn">턴 종료</button>
+          <button id="resetBtn">게임 리셋</button>
+          <button id="reconnectBtn">연결 재시도</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>플레이어</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>플레이어</th>
+              <th>잔고</th>
+              <th>위치</th>
+              <th>소유지</th>
+              <th>상태</th>
+            </tr>
+          </thead>
+          <tbody id="playersBody"></tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <h2>보드</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>칸</th>
+              <th>이름</th>
+              <th>티어</th>
+              <th>소유자</th>
+              <th>건물</th>
+              <th>현재 통행료</th>
+              <th>말 위치</th>
+            </tr>
+          </thead>
+          <tbody id="boardBody"></tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <h2>로그</h2>
+        <ul class="log" id="logList"></ul>
+      </section>
+    </main>
+
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script>
+      const BUILD_LABEL_MAP = {
+        EMPTY: "없음",
+        HOUSE_1: "집 1채",
+        HOUSE_2: "집 2채",
+        HOUSE_3: "집 3채",
+        HOTEL: "호텔",
+        LANDMARK: "랜드마크",
+      };
+
+      const DEFAULT_PLAYERS = ["P1", "P2", "P3", "P4"];
+
+      let socket = null;
+      let connected = false;
+      let sessionId = null;
+      let state = null;
+      let logs = [];
+
+      const statusEl = document.getElementById("status");
+      const playersBodyEl = document.getElementById("playersBody");
+      const boardBodyEl = document.getElementById("boardBody");
+      const logListEl = document.getElementById("logList");
+      const diceSelectEl = document.getElementById("diceSelect");
+      const serverUrlInputEl = document.getElementById("serverUrlInput");
+
+      function formatMoney(value) {
+        return `${Number(value).toLocaleString("ko-KR")}원`;
+      }
+
+      function pushLog(message) {
+        logs.unshift(message);
+        logs = logs.slice(0, 120);
+      }
+
+      function serverUrl() {
+        const direct = (serverUrlInputEl.value || "").trim();
+        if (direct) {
+          return direct;
+        }
+        return "http://127.0.0.1:8000";
+      }
+
+      function emitEvent(eventName, payload = {}) {
+        if (!socket || !connected) {
+          pushLog("오류: Socket.IO 연결이 없습니다.");
+          render();
+          return;
+        }
+        socket.emit(eventName, payload);
+      }
+
+      function eventToText(eventName, event) {
+        if (!event) {
+          return `${eventName}: 처리 완료`;
+        }
+
+        if (eventName === "roll") {
+          const landed = event.landed_tile_name || "START";
+          const tollText = event.toll ? `, 통행료 ${formatMoney(event.toll)}` : "";
+          return `${event.player_id} 주사위 ${event.roll} -> ${landed} (${event.action}${tollText})`;
+        }
+
+        if (eventName === "buy") {
+          return `${event.player_id} ${event.tile_name} 구매 (${formatMoney(event.cost)})`;
+        }
+
+        if (eventName === "build") {
+          return `${event.player_id} ${event.tile_name} 건설 단계 ${event.building_stage} (${formatMoney(event.cost)})`;
+        }
+
+        if (eventName === "sell_next") {
+          return `${event.player_id} ${event.tile_name} 매각 환급 ${formatMoney(event.refund)}`;
+        }
+
+        if (eventName === "end_turn") {
+          return `턴 종료 -> 다음 플레이어 ${event.next_player_id || "없음"}`;
+        }
+
+        return `${eventName}: ${JSON.stringify(event)}`;
+      }
+
+      function bindSocketHandlers(s) {
+        s.on("connect", () => {
+          connected = true;
+          pushLog(`Socket.IO 연결됨: ${s.id}`);
+          render();
+        });
+
+        s.on("disconnect", () => {
+          connected = false;
+          pushLog("Socket.IO 연결 종료");
+          render();
+        });
+
+        s.on("connect_error", (err) => {
+          pushLog(`연결 오류: ${err?.message || err}`);
+          render();
+        });
+
+        s.on("connected", () => {
+          pushLog("서버 핸드셰이크 완료");
+          emitEvent("create_session", { player_ids: DEFAULT_PLAYERS });
+          render();
+        });
+
+        s.on("game_error", (message) => {
+          pushLog(`오류(${message.event}): ${message.message}`);
+          render();
+        });
+
+        s.on("session_created", (message) => {
+          sessionId = message.session_id;
+          state = message.state;
+          pushLog(`세션 생성: ${sessionId}`);
+          render();
+        });
+
+        s.on("session_joined", (message) => {
+          sessionId = message.session_id;
+          state = message.state;
+          pushLog(`세션 입장: ${sessionId}`);
+          render();
+        });
+
+        s.on("update", (message) => {
+          state = message.state;
+          sessionId = message.session_id;
+          pushLog(eventToText(message.event_name, message.event));
+          if (state && state.gameover) {
+            pushLog(state.winner_id ? `게임 종료. 승자: ${state.winner_id}` : "게임 종료");
+          }
+          render();
+        });
+
+        s.on("state", (message) => {
+          state = message.state;
+          sessionId = message.session_id;
+          pushLog("상태 동기화 완료");
+          render();
+        });
+
+        s.on("result", (message) => {
+          const ranking = message.result.ranking || [];
+          const text = ranking
+            .map((item) => `${item.rank}위 ${item.player_id} (${formatMoney(item.balance)})`)
+            .join(" / ");
+          pushLog(`결과: ${text || "없음"}`);
+          render();
+        });
+
+        s.on("session_closed", (message) => {
+          if (sessionId === message.session_id) {
+            sessionId = null;
+            state = null;
+          }
+          pushLog(`세션 종료: ${message.session_id}`);
+          render();
+        });
+      }
+
+      function connectSocket() {
+        if (socket) {
+          socket.disconnect();
+          socket = null;
+        }
+
+        const base = serverUrl();
+        pushLog(`Socket.IO 접속 시도: ${base}`);
+        socket = io(base, {
+          path: "/socket.io",
+          transports: ["websocket"],
+        });
+        bindSocketHandlers(socket);
+      }
+
+      function renderStatus() {
+        const turn = state ? state.current_player_id || "-" : "-";
+        const rolled = state ? (state.turn_rolled ? "굴림 완료" : "대기") : "-";
+        const gameStatus =
+          state && state.gameover
+            ? `<span class="danger">게임 종료${state.winner_id ? ` (승자: ${state.winner_id})` : ""}</span>`
+            : "진행 중";
+
+        statusEl.innerHTML = `
+          <div>연결 상태: <strong>${connected ? "연결됨" : "끊김"}</strong></div>
+          <div>세션 ID: <strong>${sessionId || "-"}</strong></div>
+          <div>현재 턴: <strong>${turn}</strong></div>
+          <div>주사위 굴림 여부: <strong>${rolled}</strong></div>
+          <div>${gameStatus}</div>
+        `;
+      }
+
+      function renderPlayers() {
+        playersBodyEl.innerHTML = "";
+        if (!state || !state.players) {
+          return;
+        }
+
+        for (const player of state.players) {
+          const tile = state.board[player.position];
+          const row = document.createElement("tr");
+          row.innerHTML = `
+            <td>${player.user_id}</td>
+            <td>${formatMoney(player.balance)}</td>
+            <td>${player.position} (${tile.name})</td>
+            <td>${(player.owned_tiles || []).join(", ") || "-"}</td>
+            <td>${player.is_gameover ? "<span class='danger'>파산</span>" : "생존"}</td>
+          `;
+          playersBodyEl.appendChild(row);
+        }
+      }
+
+      function renderBoard() {
+        boardBodyEl.innerHTML = "";
+        if (!state || !state.board) {
+          return;
+        }
+
+        for (const tile of state.board) {
+          const occupants = (state.players || [])
+            .filter((player) => !player.is_gameover && player.position === tile.index)
+            .map((player) => player.user_id)
+            .join(", ");
+
+          const row = document.createElement("tr");
+
+          if (tile.name === "START") {
+            row.innerHTML = `
+              <td>${tile.index}</td>
+              <td>START</td>
+              <td>-</td>
+              <td>-</td>
+              <td>-</td>
+              <td>-</td>
+              <td>${occupants || "-"}</td>
+            `;
+          } else {
+            row.innerHTML = `
+              <td>${tile.index}</td>
+              <td>${tile.name}</td>
+              <td>${tile.tier}</td>
+              <td>${tile.owner_id || "-"}</td>
+              <td>${BUILD_LABEL_MAP[tile.building_label] || tile.building_label}</td>
+              <td>${formatMoney(tile.current_toll)}</td>
+              <td>${occupants || "-"}</td>
+            `;
+          }
+
+          boardBodyEl.appendChild(row);
+        }
+      }
+
+      function renderLogs() {
+        logListEl.innerHTML = "";
+        for (const message of logs) {
+          const li = document.createElement("li");
+          li.textContent = message;
+          logListEl.appendChild(li);
+        }
+      }
+
+      function render() {
+        renderStatus();
+        renderPlayers();
+        renderBoard();
+        renderLogs();
+      }
+
+      document.getElementById("rollBtn").addEventListener("click", () => {
+        const selected = diceSelectEl.value;
+        const forced = selected === "R" ? null : Number(selected);
+        emitEvent("roll", { forced_value: forced });
+      });
+
+      document.getElementById("buyBtn").addEventListener("click", () => {
+        emitEvent("buy");
+      });
+
+      document.getElementById("buildBtn").addEventListener("click", () => {
+        emitEvent("build");
+      });
+
+      document.getElementById("sellBtn").addEventListener("click", () => {
+        emitEvent("sell_next");
+      });
+
+      document.getElementById("endBtn").addEventListener("click", () => {
+        emitEvent("end_turn");
+      });
+
+      document.getElementById("resetBtn").addEventListener("click", () => {
+        if (sessionId) {
+          emitEvent("close_session", { session_id: sessionId });
+        }
+        window.setTimeout(() => {
+          emitEvent("create_session", { player_ids: DEFAULT_PLAYERS });
+        }, 100);
+      });
+
+      document.getElementById("reconnectBtn").addEventListener("click", () => {
+        connectSocket();
+      });
+
+      pushLog("페이지 로드 완료");
+      connectSocket();
+      render();
+    </script>
+  </body>
+</html>
