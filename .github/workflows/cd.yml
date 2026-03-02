@@ -1,0 +1,74 @@
+# ── CD: AWS EC2 자동 배포 파이프라인 ──────────────────────
+# develop 브랜치에 push 되면 EC2에 자동 배포
+
+name: CD - Deploy to EC2
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:  # 수동 배포 트리거
+
+env:
+  DOCKER_IMAGE: modoo-marble-backend
+
+jobs:
+  deploy:
+    name: 🚀 Deploy to EC2
+    runs-on: ubuntu-latest
+    # CI가 성공한 후에만 배포
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/develop'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to EC2 via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          script: |
+            set -e
+            echo "📦 배포 시작..."
+
+            # 프로젝트 디렉토리 이동
+            cd ~/modoo-marble-backend
+
+            # 최신 코드 pull
+            echo "📥 코드 업데이트..."
+            git fetch origin develop
+            git reset --hard origin/develop
+
+            # Docker Compose로 빌드 & 재시작
+            echo "🐳 Docker Compose 빌드 & 재시작..."
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml down
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+
+            # 오래된 이미지 정리
+            docker image prune -f
+
+            # 헬스체크 대기
+            echo "⏳ 헬스체크 대기 (최대 60초)..."
+            for i in $(seq 1 12); do
+              if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+                echo "✅ 배포 완료! 서버가 정상 작동 중입니다."
+                exit 0
+              fi
+              echo "  대기 중... ($i/12)"
+              sleep 5
+            done
+
+            echo "❌ 헬스체크 실패"
+            docker compose logs --tail=50 backend
+            exit 1
+
+      - name: Notify deployment result
+        if: always()
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "✅ 배포 성공: ${{ github.sha }}"
+          else
+            echo "❌ 배포 실패: ${{ github.sha }}"
+          fi
