@@ -78,7 +78,7 @@ async def health_check():
 
 # ── Socket.IO ASGI 마운트 ─────────────────────────────────
 # Socket.IO를 /ws 경로에 마운트 (REST API와 분리)
-socket_app = socketio.ASGIApp(sio, other_app=app)
+socket_app = socketio.ASGIApp(sio, app)
 
 # uvicorn이 실행할 최종 ASGI 앱
 application = socket_app
