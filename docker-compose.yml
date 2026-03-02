@@ -1,0 +1,35 @@
+services:
+  # PostgreSQL
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: modoo  # DB 접속ID
+      POSTGRES_PASSWORD: modoo1234  # DB 접속 비밀번호 (개발용)
+      POSTGRES_DB: modoo_marble # 생성할 테이터베이스 이름
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data # 데이터 영속성 (안전장치)
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql # 초기 DB 설정
+
+  # Redis
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  # FastAPI 백엔드 서비스
+  backend:
+    build: . # Dockerfile 적용
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env # API 키나 비밀번호 등 민감한 정보는 .env 파일에서 불러옴
+    depends_on:
+      - db  # DB 서비스가 먼저 준비된 후 실행
+      - redis # Redis 서비스가 먼저 준비된 후 실행
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+# 영구 저장이 필요한 데이터를 위한 볼륨 정의
+volumes:
+  postgres_data:
