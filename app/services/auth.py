@@ -3,7 +3,7 @@ auth.py — 인증 서비스
 JWT 발급/검증, 카카오 OAuth 처리
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from jose import JWTError, jwt
 
@@ -12,7 +12,7 @@ from app.config import settings
 
 def create_access_token(user_id: str, is_guest: bool = False) -> str:
     """JWT 액세스 토큰 생성."""
-    expire = datetime.now(timezone.utc) + timedelta(hours=settings.JWT_EXPIRE_HOURS)
+    expire = datetime.now(UTC) + timedelta(hours=settings.JWT_EXPIRE_HOURS)
     payload = {
         "sub": user_id,
         "is_guest": is_guest,
