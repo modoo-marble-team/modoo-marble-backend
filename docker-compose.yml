@@ -1,35 +1,67 @@
+# ── 모두의 마블 Docker Compose ────────────────────────────
+# FastAPI + PostgreSQL + Redis
+
 services:
-  # PostgreSQL
+  # ── PostgreSQL ──────────────────────────────────────────
   db:
     image: postgres:16
+    container_name: modoo-db
     environment:
-      POSTGRES_USER: modoo  # DB 접속ID
-      POSTGRES_PASSWORD: modoo1234  # DB 접속 비밀번호 (개발용)
-      POSTGRES_DB: modoo_marble # 생성할 테이터베이스 이름
+      POSTGRES_USER: modoo
+      POSTGRES_PASSWORD: modoo1234
+      POSTGRES_DB: modoo_marble
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data # 데이터 영속성 (안전장치)
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql # 초기 DB 설정
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U modoo -d modoo_marble"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
 
-  # Redis
+  # ── Redis ───────────────────────────────────────────────
   redis:
-    image: redis:7
+    image: redis:7-alpine
+    container_name: modoo-redis
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
 
-  # FastAPI 백엔드 서비스
+  # ── FastAPI Backend ─────────────────────────────────────
   backend:
-    build: . # Dockerfile 적용
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: modoo-backend
     ports:
       - "8000:8000"
     env_file:
-      - .env # API 키나 비밀번호 등 민감한 정보는 .env 파일에서 불러옴
+      - .env
+    environment:
+      DATABASE_URL: postgres://modoo:modoo1234@db:5432/modoo_marble
+      REDIS_URL: redis://redis:6379
     depends_on:
-      - db  # DB 서비스가 먼저 준비된 후 실행
-      - redis # Redis 서비스가 먼저 준비된 후 실행
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # 개발 모드: 핫리로드 + 소스 마운트
+    volumes:
+      - .:/app
+    command: uvicorn app.main:application --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
 
-# 영구 저장이 필요한 데이터를 위한 볼륨 정의
 volumes:
   postgres_data:
+  redis_data:
