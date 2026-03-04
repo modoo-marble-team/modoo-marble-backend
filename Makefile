@@ -119,9 +119,9 @@ dupgrade:  # 도커 내부에서 migration 적용 (backend 컨테이너 기준)
 # Git Helpers
 # ------------------------------------------------------------------------------
 
-git-sync:  # fetch + checkout develop + pull (공용 브랜치 최신화)
-	git fetch origin
+git-sync: # 브랜치 최신화
 	git checkout develop
+	git fetch origin
 	git pull origin develop
 
 # ------------------------------------------------------------------------------
