@@ -3,13 +3,12 @@ from contextlib import asynccontextmanager
 import socketio
 import structlog
 from fastapi import FastAPI
-from fastapi.openapi.models import OAuth2
 from starlette.middleware.cors import CORSMiddleware
 from tortoise import Tortoise
 
 from app.config import TORTOISE_ORM, settings
 from app.redis_client import close_redis, init_redis
-from app.routers import auth, game, lobby, users
+from app.routers import auth
 
 # 로깅 라이브러리
 # 서버에서 무슨 일이 일어나고 있는지 기록하는 로깅 도구
