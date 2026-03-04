@@ -16,7 +16,7 @@ class Game(Model):
     round_count = fields.SmallIntField(default=0)
     created_at = fields.DatetimeField(auto_now_add=True)
 
-    players: ReverseRelation["UserGame"]
+    players: ReverseRelation[UserGame]
 
     class Meta:
         table = "games"
