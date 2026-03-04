@@ -61,9 +61,6 @@ app.add_middleware(  # app에 미들웨어 추가 (FastAPI 내장 메서드)
 )
 
 app.include_router(auth.router, prefix="/v1/auth", tags=["Auth"])
-# app.include_router(users.router, prefix="/v1/users", tags=["Users"])
-# app.include_router(lobby.router, prefix="/v1/rooms", tags=["Lobby"])
-# app.include_router(game.router, prefix="/v1/game", tags=["Game"])
 
 
 # 헬스체크
