@@ -1,16 +1,15 @@
-# .pre-commit-config.yaml
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.6.4
     hooks:
       - id: ruff
-        args: [ --fix, --select, I ]
-      - id: ruff-format
+        args: [--fix, --select, I]  # import 정렬 자동 수정
+      - id: ruff-format              # 코드 포맷팅
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.6.0
     hooks:
-      - id: trailing-whitespace   # 불필요한 공백 제거
-      - id: end-of-file-fixer     # 파일 끝에 빈 줄 추가 (표준)
-      - id: check-yaml            # YAML 문법 검사
-      - id: check-added-large-files # 너무 큰 파일 업로드 방지
+      - id: trailing-whitespace      # 불필요한 공백 제거
+      - id: end-of-file-fixer        # 파일 끝 빈 줄 추가
+      - id: check-yaml               # YAML 문법 검사
+      - id: check-added-large-files  # 큰 파일 업로드 방지
