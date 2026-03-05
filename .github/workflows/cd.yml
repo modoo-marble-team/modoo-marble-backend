@@ -1,0 +1,28 @@
+name: CD - Deploy to EC2
+
+# main branch push 할 경우
+# develop -> main으로 머지될 때
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest # GitHub가 제공하는 임시 Ubuntu 컴퓨터에서 실행
+
+    steps:
+      - name: Deploy to EC2 via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }} # EC2 주소
+          username: ${{ secrets.EC2_USERNAME }} # EC2 유저명 (보통 ubuntu)
+          key: ${{ secrets.EC2_SSH_KEY }} # 개인키
+          port: 22 # SSH 기본 포트
+          script: |
+            cd ~/modoo-marble-backend     # 프로젝트 폴더로 이동
+            git fetch origin main         # 최신 코드 가져오기
+            git reset --hard origin/main  # 로컬을 main 기준으로 덮어씌우기
+            docker compose down           # 기존 컨테이너 종료
+            docker compose up -d --build  # 새로 빌드하고 백그라운드 실행
+            docker image prune -f         # 안 쓰는 이미지 정리
