@@ -12,8 +12,10 @@ class User(Model):
     )  # EX) 550e8400-e29b-41d4-a716-446655440000
     kakao_id = fields.CharField(max_length=50, unique=True, null=True)
     nickname = fields.CharField(max_length=20, unique=True)
+    hashed_password = fields.CharField(max_length=20, unique=True)
     profile_image_url = fields.TextField(null=True)
     is_guest = fields.BooleanField(default=False)
+
     created_at = fields.DatetimeField(auto_now_add=True)  # 생성될 때 딱 한 번
     updated_at = fields.DatetimeField(auto_now=True)  # 수정될 때마다 갱신
 
@@ -26,3 +28,6 @@ class User(Model):
     # 구분 기준은 주도권
     # 라이브러리 -> 내가 주도권을 가짐. 필요할 때 내가 꺼내서 씀.
     # 프레임워크 -> 프레임워크가 주도권을 가짐. 정해진 구조에 내가 맞춤.
+
+    def __str__(self):
+        return f"[{self.id}] {self.nickname}"
