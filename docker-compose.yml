@@ -1,0 +1,57 @@
+# 실행할 서비스 목록 정의
+services:
+
+  # PostgreSQL DB 컨테이너
+  db:
+    image: postgres:16          # Docker Hub에서 postgres 16 버전 이미지 사용
+    container_name: modoo-db    # 컨테이너 이름 (docker ps 할 때 보임)
+    environment:                # 컨테이너 안에서 사용할 환경변수
+      POSTGRES_USER: ${DB_USER}          # DB 유저명
+      POSTGRES_PASSWORD: ${DB_PASSWORD}  # DB 비밀번호
+      POSTGRES_DB: ${DB_NAME}     # 생성할 DB 이름
+    ports:
+      - "5432:5432"             # 로컬포트:컨테이너포트 (외부에서 접근 가능하게)
+    volumes:
+      - postgres_data:/var/lib/postgresql/data  # DB 데이터 영구 저장
+    healthcheck:                # 컨테이너가 정상 작동 중인지 주기적으로 확인
+      test: ["CMD-SHELL", "pg_isready -U modoo -d modoo_marble"]  # 확인 명령어
+      interval: 10s             # 10초마다 확인
+      timeout: 5s               # 5초 안에 응답 없으면 실패
+      retries: 5                # 5번 실패하면 unhealthy 상태로 변경
+
+  # Redis 컨테이너
+  redis:
+    image: redis:7-alpine       # alpine = 매우 가벼운 Linux 기반 이미지
+    container_name: modoo-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]  # ping 명령으로 Redis 상태 확인
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # FastAPI 백엔드 컨테이너
+  backend:
+    build:
+      context: .                # Dockerfile이 있는 위치 (현재 디렉토리)
+      dockerfile: Dockerfile    # 사용할 Dockerfile 이름
+    container_name: modoo-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env                    # .env 파일의 환경변수를 컨테이너에 주입
+    depends_on:
+      db:
+        condition: service_healthy   # db가 healthy 상태일 때만 시작
+      redis:
+        condition: service_healthy   # redis가 healthy 상태일 때만 시작
+    volumes:
+      - .:/app                  # 로컬 코드를 컨테이너에 마운트 (핫리로드용)
+    command: uv run uvicorn app.main:application --host 0.0.0.0 --port 8000 --reload
+    #                                                                         ^^^^^^
+    #                                                             코드 변경 시 자동 재시작
+
+# 컨테이너가 삭제돼도 DB 데이터가 유지되도록 볼륨 선언
+volumes:
+  postgres_data:

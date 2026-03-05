@@ -1,54 +1,31 @@
-# ── 가상환경 ─────────────────────────────────────────────
+# 가상환경
 .venv/
 venv/
-env/
-ENV/
 
-# ── Python ───────────────────────────────────────────────
+# Python 캐시
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-*.egg
 *.egg-info/
-dist/
-build/
-.eggs/
 
-# ── 환경 변수 (절대 커밋 금지) ────────────────────────────
+# 환경변수
 .env
 .env.*
 !.env.example
 
-# ── IDE ──────────────────────────────────────────────────
+# IDE
 .vscode/
 .idea/
-*.swp
-*.swo
 .DS_Store
 
-# ── 테스트 / 커버리지 ─────────────────────────────────────
+# 테스트/커버리지
 .pytest_cache/
 .coverage
 htmlcov/
-coverage.xml
 
-# ── Aerich 마이그레이션 (생성물만 제외, migrations/ 자체는 커밋) ──
-# migrations/ 폴더는 커밋 대상입니다
-# aerich.ini는 커밋 대상입니다
-
-# ── 로그 ─────────────────────────────────────────────────
+# 로그
 *.log
 logs/
 
-# ── 기타 ─────────────────────────────────────────────────
-*.bak
-*.tmp
+# 기타
 .mypy_cache/
 .ruff_cache/
-
-# macOS
-.DS_Store
-
-# JetBrains
-*.iml
