@@ -60,6 +60,6 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.aerich]
-tortoise_orm = "config.TORTOISE_ORM"
+tortoise_orm = "app.config.TORTOISE_ORM"
 location = "./migrations"
-src_folder = "./"
+src_folder = "./."
