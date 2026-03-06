@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgres://modoo:modoo1234@db:5432/modoo_marble"
     REDIS_URL: str = "redis://redis:6379"
 
-    JWT_SECRET: str = "change-me-in-production"
+    JWT_SECRET: str
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_HOURS: int = 24
     JWT_ACCESS_EXPIRE_MINUTES: int = 60
@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     KAKAO_REDIRECT_URI: str = ""
     FRONTEND_LOGIN_REDIRECT: str = ""
 
+    KAKAO_TOKEN_URL: str = "https://kauth.kakao.com/oauth/token"
+    KAKAO_ME_URL: str = "https://kapi.kakao.com/v2/user/me"
+
     GEMINI_API_KEY: str = ""
 
     APP_ENV: str = "development"
@@ -31,6 +34,10 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+if not settings.JWT_SECRET:
+    raise ValueError("JWT_SECRET is required")
+
 
 TORTOISE_ORM = {
     "connections": {
