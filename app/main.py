@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from contextlib import asynccontextmanager
 
 import socketio
@@ -7,8 +9,11 @@ from starlette.middleware.cors import CORSMiddleware
 from tortoise import Tortoise
 
 from app.config import TORTOISE_ORM, settings
+from app.models.user import User
+from app.presence import list_online, set_offline, set_online
 from app.redis_client import close_redis, init_redis
-from app.routers import auth
+from app.routers import auth, users
+from app.utils.jwt import decode_token
 
 # 로깅 라이브러리
 # 서버에서 무슨 일이 일어나고 있는지 기록하는 로깅 도구
@@ -22,13 +27,66 @@ sio = socketio.AsyncServer(
     cors_allowed_origins=settings.CORS_ORIGINS,  # 허용하는 요청 주소를 정해놓는다
 )
 
+_sid_to_user: dict[str, int] = {}
+
+
+async def _broadcast_online_users() -> None:
+    users_list = await list_online()
+    await sio.emit("online_users", {"users": users_list})
+
+
+# Socket 인증 + Presence
+@sio.event
+async def connect(sid: str, environ: dict, auth_data: dict | None):
+    try:
+        token = (auth_data or {}).get("token")
+        if not token:
+            raise ConnectionRefusedError("Missing token")
+
+        payload = decode_token(
+            secret=settings.JWT_SECRET,
+            algorithm=settings.JWT_ALGORITHM,
+            token=str(token),
+        )
+        sub = payload.get("sub")
+        if not sub:
+            raise ConnectionRefusedError("Invalid payload")
+
+        user_id = int(sub)
+        user = await User.get_or_none(id=user_id, deleted_at__isnull=True)
+        if not user:
+            raise ConnectionRefusedError("User not found or deleted")
+
+        _sid_to_user[sid] = int(user.id)
+        await set_online(user_id=str(user.id), nickname=user.nickname, status="online")
+
+        await sio.enter_room(sid, f"user:{user.id}")
+        await _broadcast_online_users()
+        return True
+    except ConnectionRefusedError as e:
+        raise e
+    except Exception:
+        raise ConnectionRefusedError("Internal server error")
+
+
+@sio.event
+async def disconnect(sid: str):
+    try:
+        user_id = _sid_to_user.pop(sid, None)
+        if user_id is not None:
+            await set_offline(user_id=str(user_id))
+            await _broadcast_online_users()
+    except Exception:
+        pass
+
 
 # 서버 시작/종료 시 실행할 작업
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 시작 시
     await Tortoise.init(config=TORTOISE_ORM)  # DB 연결
-    await Tortoise.generate_schemas()  # 모델을 보고 DB에 테이블을 자동으로 생성
+    if settings.APP_ENV == "development":
+        await Tortoise.generate_schemas()  # 개발 환경에서만 테이블 자동 생성
     await init_redis()  # Redis 연결
     logger.info("✅ DB/Redis 연결이 완료되었습니다.")
 
@@ -36,6 +94,7 @@ async def lifespan(app: FastAPI):
     # 서버가 살아있고 DB랑 Redis 연결이 유지되도록 도와줌
 
     # 종료 시 (연결 정리)
+    await auth.http_client.aclose()
     await close_redis()
     await Tortoise.close_connections()
     logger.info("☠️️☠️️☠️️ DB/Redis 연결이 끊겼습니다.️")
@@ -61,6 +120,7 @@ app.add_middleware(  # app에 미들웨어 추가 (FastAPI 내장 메서드)
 )
 
 app.include_router(auth.router, prefix="/v1/auth", tags=["Auth"])
+app.include_router(users.router, prefix="/v1/users", tags=["Users"])
 
 
 # 헬스체크

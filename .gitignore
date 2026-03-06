@@ -9,8 +9,8 @@ __pycache__/
 
 # 환경변수
 .env
-.env.*
-!.env.example
+.env
+!.env
 
 # IDE
 .vscode/
