@@ -152,6 +152,7 @@ app.add_middleware(  # app에 미들웨어 추가 (FastAPI 내장 메서드)
 app.include_router(auth.router, prefix="/v1/auth", tags=["Auth"])
 app.include_router(users.router, prefix="/v1", tags=["Users"])
 
+
 # 헬스체크
 @app.get("/health", tags=["System"])
 async def health_check():
