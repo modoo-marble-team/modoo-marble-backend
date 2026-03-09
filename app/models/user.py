@@ -1,4 +1,4 @@
-import uuid
+import uuid  # noqa: F401
 
 from tortoise import Model, fields
 
@@ -7,14 +7,14 @@ from tortoise import Model, fields
 
 
 class User(Model):
-    id = fields.UUIDField(
-        pk=True, default=uuid.uuid4
-    )  # EX) 550e8400-e29b-41d4-a716-446655440000
-    kakao_id = fields.CharField(max_length=50, unique=True, null=True)
+    id = fields.IntField(pk=True)
+    kakao_id = fields.CharField(max_length=50, null=True, unique=True)
     nickname = fields.CharField(max_length=20, unique=True)
-    hashed_password = fields.CharField(max_length=20, unique=True)
+    hashed_password = fields.CharField(max_length=128, null=True)
     profile_image_url = fields.TextField(null=True)
     is_guest = fields.BooleanField(default=False)
+
+    deleted_at = fields.DatetimeField(null=True)
 
     created_at = fields.DatetimeField(auto_now_add=True)  # 생성될 때 딱 한 번
     updated_at = fields.DatetimeField(auto_now=True)  # 수정될 때마다 갱신
