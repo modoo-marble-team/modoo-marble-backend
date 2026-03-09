@@ -2,7 +2,7 @@
 # Makefile
 # ==============================================================================
 
-COMPOSE_FILE ?= docker-compose.local.yml
+COMPOSE_FILE ?= docker-compose.yml
 
 UV ?= uv
 RUN = $(UV) run

@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 import socketio
 import structlog
 from fastapi import FastAPI
+from fastapi.openapi.utils import get_openapi
 from starlette.middleware.cors import CORSMiddleware
 from tortoise import Tortoise
 
@@ -109,6 +110,35 @@ app = FastAPI(
     lifespan=lifespan,  # 시작/종료 함수 등록
 )
 
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        routes=app.routes,
+    )
+
+    schema.setdefault("components", {}).setdefault("securitySchemes", {})
+    schema["components"]["securitySchemes"]["BearerAuth"] = {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+    }
+
+    for path_item in schema.get("paths", {}).values():
+        for operation in path_item.values():
+            if isinstance(operation, dict):
+                operation.setdefault("security", [{"BearerAuth": []}])
+
+    app.openapi_schema = schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
+
 # CORS 설정
 # 허용된 주소의 요청인지 확인하기 위해
 app.add_middleware(  # app에 미들웨어 추가 (FastAPI 내장 메서드)
@@ -120,8 +150,7 @@ app.add_middleware(  # app에 미들웨어 추가 (FastAPI 내장 메서드)
 )
 
 app.include_router(auth.router, prefix="/v1/auth", tags=["Auth"])
-app.include_router(users.router, prefix="/v1/users", tags=["Users"])
-
+app.include_router(users.router, prefix="/v1", tags=["Users"])
 
 # 헬스체크
 @app.get("/health", tags=["System"])
