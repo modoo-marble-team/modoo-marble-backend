@@ -11,7 +11,7 @@ from tortoise import Tortoise
 
 from app.config import TORTOISE_ORM, settings
 from app.models.user import User
-from app.presence import list_online, set_offline, set_online
+from app.presence import set_offline, set_online
 from app.redis_client import close_redis, init_redis
 from app.routers import auth, users
 from app.utils.jwt import decode_token
@@ -31,9 +31,11 @@ sio = socketio.AsyncServer(
 _sid_to_user: dict[str, int] = {}
 
 
-async def _broadcast_online_users() -> None:
-    users_list = await list_online()
-    await sio.emit("online_users", {"users": users_list})
+async def _broadcast_user_status(user_id: int, nickname: str, status: str) -> None:
+    await sio.emit(
+        "user_status_changed",
+        {"id": user_id, "nickname": nickname, "status": status},
+    )
 
 
 # Socket 인증 + Presence
@@ -62,7 +64,7 @@ async def connect(sid: str, environ: dict, auth_data: dict | None):
         await set_online(user_id=str(user.id), nickname=user.nickname, status="online")
 
         await sio.enter_room(sid, f"user:{user.id}")
-        await _broadcast_online_users()
+        await _broadcast_user_status(int(user.id), user.nickname, "online")
         return True
     except ConnectionRefusedError as e:
         raise e
@@ -76,7 +78,7 @@ async def disconnect(sid: str):
         user_id = _sid_to_user.pop(sid, None)
         if user_id is not None:
             await set_offline(user_id=str(user_id))
-            await _broadcast_online_users()
+            await _broadcast_user_status(int(user_id), "", "offline")
     except Exception:
         pass
 
