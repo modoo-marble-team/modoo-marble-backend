@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import StrEnum
 
 
-class TileType(str, StrEnum):
+class TileType(StrEnum):
     """보드 타일의 종류"""
 
     START = "START"
@@ -14,7 +14,7 @@ class TileType(str, StrEnum):
     ISLAND = "ISLAND"
 
 
-class PlayerState(str, StrEnum):
+class PlayerState(StrEnum):
     """플레이어의 현재 상태"""
 
     NORMAL = "NORMAL"
@@ -22,7 +22,7 @@ class PlayerState(str, StrEnum):
     BANKRUPT = "BANKRUPT"
 
 
-class ActionType(str, StrEnum):
+class ActionType(StrEnum):
     """클라이언트 → 서버 game:action의 type"""
 
     ROLL_DICE = "ROLL_DICE"
@@ -31,7 +31,7 @@ class ActionType(str, StrEnum):
     END_TURN = "END_TURN"
 
 
-class ServerEventType(str, StrEnum):
+class ServerEventType(StrEnum):
     """서버 → 클라이언트 game:patch의 events 안에 들어가는 타입"""
 
     DICE_ROLLED = "DICE_ROLLED"
@@ -47,7 +47,7 @@ class ServerEventType(str, StrEnum):
     GAME_OVER = "GAME_OVER"
 
 
-class PatchOp(str, StrEnum):
+class PatchOp(StrEnum):
     """game:patch 안의 patch 배열에서 쓰는 연산"""
 
     SET = "set"  # 값을 덮어씀

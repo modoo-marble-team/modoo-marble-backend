@@ -19,6 +19,12 @@ def _game_key(game_id: str) -> str:
 GAME_LOCK_TIMEOUT = 5
 
 
+class LockAcquisitionError(Exception):
+    """게임 락을 얻지 못했을 때 발생하는 예외"""
+
+    pass
+
+
 @asynccontextmanager
 async def game_lock(game_id: str):
     """
@@ -30,8 +36,16 @@ async def game_lock(game_id: str):
         f"game:{game_id}:lock",
         timeout=GAME_LOCK_TIMEOUT,
     )
-    async with lock:
+    try:
+        acquired = await lock.acquire(blocking=True, blocking_timeout=3)
+        if not acquired:
+            raise LockAcquisitionError(f"게임 {game_id} 락 획득 실패")
         yield
+    finally:
+        try:
+            await lock.release()
+        except Exception:
+            pass  # 이미 만료된 락은 해제 실패해도 괜찮음
 
 
 def _make_initial_players(
@@ -121,3 +135,11 @@ def get_tile_state(state: GameState, tile_id: int) -> TileGameState | None:
     EVENT, CHANCE 같은 특수 칸은 None을 반환한다.
     """
     return state["tiles"].get(str(tile_id))
+
+
+def get_player_state(state: GameState, user_id: int) -> PlayerGameState | None:
+    """
+    플레이어 상태를 안전하게 가져온다.
+    JSON 역직렬화 후 키가 str로 바뀌는 문제를 여기서 통일해서 처리.
+    """
+    return state["players"].get(str(user_id))
