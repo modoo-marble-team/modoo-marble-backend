@@ -15,7 +15,6 @@ class PlayerGameState(TypedDict):
     consecutive_doubles: int  # 연속 더블 횟수
     owned_tile_ids: list[int]  # 소유한 타일 번호 목록
     building_levels: dict[str, int]  # {"tile_id": 건물레벨}
-    is_bankrupt: bool
     turn_order: int  # 턴 순서 (0부터)
 
 
@@ -40,8 +39,12 @@ class GameState(TypedDict):
     tiles: dict[str, TileGameState]  # key = str(tile_id)
 
 
-class PatchOperation(TypedDict):
-    """game:patch 안의 patch 배열 원소 1개"""
+class ServerPatchOperation(TypedDict):
+    """
+    ⚠️ 서버 전용.
+    서버가 직접 만들어서 클라이언트에게 보내는 것.
+    클라이언트로부터 절대 받으면 안 됨.
+    """
 
     op: str  # "set" | "inc" | "push" | "remove"
     path: str  # 점(.) 구분 경로. 예: "players.1.balance"
@@ -55,5 +58,5 @@ class GamePatch(TypedDict):
     revision: int
     turn: int
     events: list[dict[str, Any]]  # 연출/로그용 이벤트 목록
-    patch: list[PatchOperation]  # 실제 상태 변경 목록
+    patch: list[ServerPatchOperation]  # 실제 상태 변경 목록
     snapshot: GameState | None  # 재연결 시에만 전체 상태 담음

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import asynccontextmanager
 
 from app.game.board import BOARD, TileType
 from app.game.enums import PlayerState
@@ -13,6 +14,24 @@ GAME_STATE_TTL = 86400  # Redis 자동 삭제 시간: 24시간 (초 단위)
 def _game_key(game_id: str) -> str:
     """게임 상태를 저장할 Redis 키"""
     return f"game:{game_id}:state"
+
+
+GAME_LOCK_TIMEOUT = 5
+
+
+@asynccontextmanager
+async def game_lock(game_id: str):
+    """
+    게임 상태를 수정할 때 반드시 이 안에서 실행.
+    한 번에 한 요청만 처리되도록 자물쇠 역할을 한다.
+    """
+    redis = get_redis()
+    lock = redis.lock(
+        f"game:{game_id}:lock",
+        timeout=GAME_LOCK_TIMEOUT,
+    )
+    async with lock:
+        yield
 
 
 def _make_initial_players(
@@ -32,7 +51,6 @@ def _make_initial_players(
             consecutive_doubles=0,
             owned_tile_ids=[],
             building_levels={},
-            is_bankrupt=False,
             turn_order=order,
         )
     return players
@@ -95,3 +113,11 @@ async def delete_game_state(game_id: str) -> None:
     """게임 종료 시 Redis에서 상태를 삭제한다. (Unit 10에서 호출)"""
     redis = get_redis()
     await redis.delete(_game_key(game_id))
+
+
+def get_tile_state(state: GameState, tile_id: int) -> TileGameState | None:
+    """
+    타일 상태를 안전하게 가져온다.
+    EVENT, CHANCE 같은 특수 칸은 None을 반환한다.
+    """
+    return state["tiles"].get(str(tile_id))

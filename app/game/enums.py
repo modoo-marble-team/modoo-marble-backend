@@ -19,6 +19,7 @@ class PlayerState(str, StrEnum):
 
     NORMAL = "NORMAL"
     LOCKED = "LOCKED"  # 무인도에 갇힌 상태
+    BANKRUPT = "BANKRUPT"
 
 
 class ActionType(str, StrEnum):
