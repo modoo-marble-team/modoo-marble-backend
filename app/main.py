@@ -10,6 +10,7 @@ from starlette.middleware.cors import CORSMiddleware
 from tortoise import Tortoise
 
 from app.config import TORTOISE_ORM, settings
+from app.game.socket_handlers import register_game_handlers
 from app.models.user import User
 from app.presence import set_offline, set_online
 from app.redis_client import close_redis, init_redis
@@ -27,6 +28,7 @@ sio = socketio.AsyncServer(
     async_mode="asgi",  # FastAPI가 ASGI 방식이라 맞춘 것
     cors_allowed_origins=settings.CORS_ORIGINS,  # 허용하는 요청 주소를 정해놓는다
 )
+register_game_handlers(sio)
 
 _sid_to_user: dict[str, int] = {}
 
