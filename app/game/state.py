@@ -143,3 +143,40 @@ def get_player_state(state: GameState, user_id: int) -> PlayerGameState | None:
     JSON 역직렬화 후 키가 str로 바뀌는 문제를 여기서 통일해서 처리.
     """
     return state["players"].get(str(user_id))
+
+
+def apply_patches(state: GameState, patches: list[dict]) -> None:
+    """
+    패치 목록을 게임 상태에 직접 적용한다 (in-place 수정).
+
+    path는 점(.)으로 구분된 경로. 예: "players.1.balance"
+    op 종류:
+      set    → 값을 덮어씀
+      inc    → 숫자에 value를 더함 (음수면 빼기)
+      push   → 배열에 value를 추가
+      remove → 배열에서 value를 제거
+    """
+    for patch in patches:
+        op = patch["op"]
+        path = patch["path"]
+        value = patch["value"]
+
+        # 점(.)으로 경로를 쪼개서 딕셔너리 탐색
+        keys = path.split(".")
+        target = state
+        for key in keys[:-1]:
+            target = target[key]  # type: ignore[index]
+
+        last_key = keys[-1]
+
+        if op == "set":
+            target[last_key] = value  # type: ignore[index]
+        elif op == "inc":
+            target[last_key] = target[last_key] + value  # type: ignore[index]
+        elif op == "push":
+            target[last_key].append(value)  # type: ignore[index]
+        elif op == "remove":
+            if isinstance(target[last_key], list):  # type: ignore[index]
+                target[last_key].remove(value)  # type: ignore[index]
+            else:
+                del target[last_key]  # type: ignore[index]
