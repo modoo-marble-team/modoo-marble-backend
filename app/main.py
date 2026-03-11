@@ -28,9 +28,8 @@ sio = socketio.AsyncServer(
     async_mode="asgi",  # FastAPI가 ASGI 방식이라 맞춘 것
     cors_allowed_origins=settings.CORS_ORIGINS,  # 허용하는 요청 주소를 정해놓는다
 )
-register_game_handlers(sio)
-
 _sid_to_user: dict[str, int] = {}
+register_game_handlers(sio, _sid_to_user)
 
 
 async def _broadcast_user_status(user_id: int, nickname: str, status: str) -> None:
