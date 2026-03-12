@@ -1,21 +1,20 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 
 import socketio
 
 TURN_TIMEOUT_SECONDS = 30
-
-# 게임별 현재 타이머 작업을 저장. key = game_id
 _timers: dict[str, asyncio.Task] = {}
 
 
 async def _auto_end_turn(game_id: str, sio: socketio.AsyncServer) -> None:
-    """30초 대기 후 자동 END_TURN 처리."""
     await asyncio.sleep(TURN_TIMEOUT_SECONDS)
 
-    # 여기서 import하는 이유: 파일 상단에서 하면 순환 참조 발생
     from app.game.actions.end_turn import process_end_turn
+    from app.game.errors import GameActionError
+    from app.game.presentation import serialize_game_patch
+    from app.game.rules import default_prompt_choice, process_prompt_response
     from app.game.state import (
         LockAcquisitionError,
         apply_patches,
@@ -27,50 +26,51 @@ async def _auto_end_turn(game_id: str, sio: socketio.AsyncServer) -> None:
     try:
         async with game_lock(game_id):
             state = await get_game_state(game_id)
-
-            # 게임이 이미 끝났거나 없으면 무시
             if state is None or state["status"] != "playing":
                 return
 
             player_id = state["current_player_id"]
-            events, patches = process_end_turn(state, player_id)
+            if state.get("pending_prompt") is not None:
+                prompt = state["pending_prompt"]
+                events, patches = process_prompt_response(
+                    state,
+                    player_id=player_id,
+                    prompt_id=prompt["prompt_id"],
+                    choice=default_prompt_choice(prompt),
+                )
+                apply_patches(state, patches)
+                end_events, end_patches = process_end_turn(state, player_id)
+                apply_patches(state, end_patches)
+                events.extend(end_events)
+            else:
+                events, patches = process_end_turn(state, player_id)
+                apply_patches(state, patches)
 
-            apply_patches(state, patches)
             state["revision"] += 1
             await save_game_state(game_id, state)
 
-        # 락 해제 후 브로드캐스트
         await sio.emit(
             "game:patch",
-            {
-                "game_id": game_id,
-                "revision": state["revision"],
-                "turn": state["turn"],
-                "events": events,
-                "patch": patches,
-                "snapshot": None,
-            },
+            serialize_game_patch(state, events=events),
             room=f"game:{game_id}",
         )
 
-        # 다음 턴 타이머 시작
-        start_turn_timer(game_id, sio)
+        if state["status"] == "playing":
+            start_turn_timer(game_id, sio)
 
-    except LockAcquisitionError:
-        pass  # 타이머 실패는 조용히 무시
-    except ValueError:
+    except (LockAcquisitionError, GameActionError):
         pass
 
 
 def start_turn_timer(game_id: str, sio: socketio.AsyncServer) -> None:
-    """새 턴 타이머를 시작한다. 기존 타이머가 있으면 먼저 취소."""
     cancel_turn_timer(game_id)
     task = asyncio.create_task(_auto_end_turn(game_id, sio))
     _timers[game_id] = task
 
 
+
 def cancel_turn_timer(game_id: str) -> None:
-    """진행 중인 턴 타이머를 취소한다."""
     task = _timers.pop(game_id, None)
     if task and not task.done():
         task.cancel()
+

@@ -1,30 +1,26 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from enum import StrEnum
 
 
 class TileType(StrEnum):
-    """보드 타일의 종류"""
-
     START = "START"
     PROPERTY = "PROPERTY"
     EVENT = "EVENT"
     CHANCE = "CHANCE"
     MOVE_TO_ISLAND = "MOVE_TO_ISLAND"
     ISLAND = "ISLAND"
+    TRAVEL = "TRAVEL"
+    AI = "AI"
 
 
 class PlayerState(StrEnum):
-    """플레이어의 현재 상태"""
-
     NORMAL = "NORMAL"
-    LOCKED = "LOCKED"  # 무인도에 갇힌 상태
+    LOCKED = "LOCKED"
     BANKRUPT = "BANKRUPT"
 
 
 class ActionType(StrEnum):
-    """클라이언트 → 서버 game:action의 type"""
-
     ROLL_DICE = "ROLL_DICE"
     BUY_PROPERTY = "BUY_PROPERTY"
     SELL_PROPERTY = "SELL_PROPERTY"
@@ -32,8 +28,6 @@ class ActionType(StrEnum):
 
 
 class ServerEventType(StrEnum):
-    """서버 → 클라이언트 game:patch의 events 안에 들어가는 타입"""
-
     DICE_ROLLED = "DICE_ROLLED"
     PLAYER_MOVED = "PLAYER_MOVED"
     LANDED = "LANDED"
@@ -48,9 +42,8 @@ class ServerEventType(StrEnum):
 
 
 class PatchOp(StrEnum):
-    """game:patch 안의 patch 배열에서 쓰는 연산"""
+    SET = "set"
+    INC = "inc"
+    PUSH = "push"
+    REMOVE = "remove"
 
-    SET = "set"  # 값을 덮어씀
-    INC = "inc"  # 숫자를 더하거나 뺌
-    PUSH = "push"  # 배열에 항목 추가
-    REMOVE = "remove"  # 배열에서 항목 제거 또는 키 삭제
