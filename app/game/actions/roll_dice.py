@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import random
 from copy import deepcopy
@@ -42,9 +42,9 @@ def _add_movement(
                 "type": ServerEventType.LANDED,
                 "playerId": player_id,
                 "tile": {
-                    "tile_id": tile_def.tile_id,
+                    "tileId": tile_def.tile_id,
                     "name": tile_def.name,
-                    "tile_type": tile_def.tile_type,
+                    "tileType": str(tile_def.tile_type),
                     "tier": tile_def.tier,
                     "price": tile_def.price,
                 },
@@ -64,12 +64,13 @@ def process_roll_dice(
     if state["status"] != "playing":
         raise GameActionError(code="INVALID_PHASE", message="Game is not active.")
     if state["phase"] != PHASE_WAIT_ROLL:
-        raise GameActionError(code="INVALID_PHASE", message="Dice can only be rolled at turn start.")
-    if player["state"] == PlayerState.BANKRUPT:
-        raise GameActionError(code="PLAYER_BANKRUPT", message="Bankrupt players cannot act.")
-        raise ValueError("게임이 진행 중이 아닙니다.")
+        raise GameActionError(
+            code="INVALID_PHASE", message="Dice can only be rolled at turn start."
+        )
     if player["playerState"] == PlayerState.BANKRUPT:
-        raise ValueError("파산한 플레이어는 행동할 수 없습니다.")
+        raise GameActionError(
+            code="PLAYER_BANKRUPT", message="Bankrupt players cannot act."
+        )
 
     dice1, dice2 = _roll()
     total = dice1 + dice2
@@ -80,14 +81,13 @@ def process_roll_dice(
             "type": ServerEventType.DICE_ROLLED,
             "playerId": player_id,
             "dice": [dice1, dice2],
-            "is_double": is_double,
+            "isDouble": is_double,
         }
     ]
     patches: list[dict] = []
 
     # ── 케이스 1: 무인도에 갇힌 상태 ───────────────────
     if player["playerState"] == PlayerState.LOCKED:
-    if player["state"] == PlayerState.LOCKED:
         patches.append({"op": "set", "path": "phase", "value": "RESOLVING"})
         if is_double:
             # 더블 → 탈출 후 이동
@@ -108,13 +108,6 @@ def process_roll_dice(
                     "value": 0,
                 },
             ]
-            patches.extend(
-                [
-                    {"op": "set", "path": f"players.{player_id}.state", "value": PlayerState.NORMAL},
-                    {"op": "set", "path": f"players.{player_id}.state_duration", "value": 0},
-                    {"op": "set", "path": f"players.{player_id}.consecutive_doubles", "value": 0},
-                ]
-            )
             events.append(
                 {
                     "type": ServerEventType.PLAYER_STATE_CHANGED,
@@ -128,40 +121,34 @@ def process_roll_dice(
             _add_movement(player_id, from_tile, to_tile, events, patches)
             preview_state = deepcopy(state)
             apply_patches(preview_state, patches)
-            landing_events, landing_patches = resolve_landing(preview_state, player_id, to_tile)
+            landing_events, landing_patches = resolve_landing(
+                preview_state, player_id, to_tile
+            )
             events.extend(landing_events)
             patches.extend(landing_patches)
             return events, patches
 
-        new_duration = player["state_duration"] - 1
+        # 더블 아님 → 무인도 잔여 턴 차감
+        new_duration = player["stateDuration"] - 1
         if new_duration <= 0:
-            patches.extend(
-                [
-                    {"op": "set", "path": f"players.{player_id}.state", "value": PlayerState.NORMAL},
-                    {"op": "set", "path": f"players.{player_id}.state_duration", "value": 0},
-        else:
-            # 더블 아님 → 무인도 잔여 턴 차감
-            new_duration = player["stateDuration"] - 1
-            if new_duration <= 0:
-                # 3턴 경과 → 자동 탈출 (이동 없음)
-                patches += [
-                    {
-                        "op": "set",
-                        "path": f"players.{player_id}.playerState",
-                        "value": PlayerState.NORMAL,
-                    },
-                    {
-                        "op": "set",
-                        "path": f"players.{player_id}.stateDuration",
-                        "value": 0,
-                    },
-                ]
-            )
+            # 3턴 경과 → 자동 탈출 (이동 없음)
+            patches += [
+                {
+                    "op": "set",
+                    "path": f"players.{player_id}.playerState",
+                    "value": PlayerState.NORMAL,
+                },
+                {
+                    "op": "set",
+                    "path": f"players.{player_id}.stateDuration",
+                    "value": 0,
+                },
+            ]
             events.append(
                 {
                     "type": ServerEventType.PLAYER_STATE_CHANGED,
-                    "player_id": player_id,
-                    "state": PlayerState.NORMAL,
+                    "playerId": player_id,
+                    "playerState": PlayerState.NORMAL,
                     "reason": "timeout_escape",
                 }
             )
@@ -169,30 +156,12 @@ def process_roll_dice(
             patches.append(
                 {
                     "op": "set",
-                    "path": f"players.{player_id}.state_duration",
+                    "path": f"players.{player_id}.stateDuration",
                     "value": new_duration,
                 }
             )
-        return events, patches
-                events.append(
-                    {
-                        "type": ServerEventType.PLAYER_STATE_CHANGED,
-                        "playerId": player_id,
-                        "playerState": PlayerState.NORMAL,
-                        "reason": "timeout_escape",
-                    }
-                )
-            else:
-                patches.append(
-                    {
-                        "op": "set",
-                        "path": f"players.{player_id}.stateDuration",
-                        "value": new_duration,
-                    }
-                )
         return events, patches  # 무인도 케이스는 여기서 종료
 
-    new_consecutive = player["consecutive_doubles"] + 1 if is_double else 0
     # ── 케이스 2: 3연속 더블 → 무인도 ──────────────────
     new_consecutive = player["consecutiveDoubles"] + 1 if is_double else 0
 
@@ -232,34 +201,6 @@ def process_roll_dice(
             },
         ]
         return events, patches  # 무인도 이동 후 종료
-        from_tile = player["current_tile_id"]
-        patches.extend(
-            [
-                {"op": "set", "path": f"players.{player_id}.current_tile_id", "value": ISLAND_TILE_ID},
-                {"op": "set", "path": f"players.{player_id}.state", "value": PlayerState.LOCKED},
-                {"op": "set", "path": f"players.{player_id}.state_duration", "value": 3},
-                {"op": "set", "path": f"players.{player_id}.consecutive_doubles", "value": 0},
-                {"op": "set", "path": "phase", "value": "RESOLVING"},
-            ]
-        )
-        events.extend(
-            [
-                {
-                    "type": ServerEventType.PLAYER_MOVED,
-                    "player_id": player_id,
-                    "from_tile_id": from_tile,
-                    "to_tile_id": ISLAND_TILE_ID,
-                    "trigger": "triple_double",
-                },
-                {
-                    "type": ServerEventType.PLAYER_STATE_CHANGED,
-                    "player_id": player_id,
-                    "state": PlayerState.LOCKED,
-                    "reason": "triple_double",
-                },
-            ]
-        )
-        return events, patches
 
     # ── 케이스 3: 일반 이동 ─────────────────────────────
     patches.append(
@@ -291,4 +232,3 @@ def process_roll_dice(
     events.extend(landing_events)
     patches.extend(landing_patches)
     return events, patches
-

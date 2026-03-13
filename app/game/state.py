@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 from contextlib import asynccontextmanager
@@ -10,7 +10,7 @@ from app.redis_client import get_redis
 
 GAME_STATE_TTL = 86400
 GAME_LOCK_TIMEOUT = 5
-INITIAL_BALANCE = 5000
+INITIAL_BALANCE = 5000  # 내부 저장 단위. 표시: 5000 * 100만원 = 50억
 
 
 def _game_key(game_id: str) -> str:
@@ -50,13 +50,13 @@ def _make_initial_players(
             playerId=uid,
             nickname=nicknames.get(uid, "Unknown"),
             balance=INITIAL_BALANCE,
-            current_tile_id=0,
-            state=PlayerState.NORMAL,
-            state_duration=0,
-            consecutive_doubles=0,
-            owned_tile_ids=[],
-            building_levels={},
-            turn_order=order,
+            currentTileId=0,
+            playerState=PlayerState.NORMAL,
+            stateDuration=0,
+            consecutiveDoubles=0,
+            ownedTiles=[],
+            buildingLevels={},
+            turnOrder=order,
         )
     return players
 
@@ -148,4 +148,3 @@ def apply_patches(state: GameState, patches: list[dict]) -> None:
                 target[last_key].remove(value)  # type: ignore[index]
             else:
                 del target[last_key]  # type: ignore[index]
-

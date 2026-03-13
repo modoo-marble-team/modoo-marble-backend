@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from app.game.board import BOARD
 from app.game.enums import PlayerState
@@ -15,7 +15,7 @@ PLAYER_STATE_MAP = {
 
 
 def _ordered_players(state: GameState) -> list[dict]:
-    return sorted(state["players"].values(), key=lambda player: player["turn_order"])
+    return sorted(state["players"].values(), key=lambda player: player["turnOrder"])
 
 
 def serialize_game_snapshot(state: GameState) -> dict:
@@ -25,20 +25,16 @@ def serialize_game_snapshot(state: GameState) -> dict:
     for tile in BOARD:
         tile_state = state["tiles"].get(
             str(tile.tile_id),
-            {"owner_id": None, "building_level": 0},
+            {"ownerId": None, "buildingLevel": 0},
         )
-        owner_id = tile_state.get("owner_id")
+        owner_id = tile_state.get("ownerId")
         tiles.append(
             {
-                "index": tile.tile_id,
                 "id": tile.tile_id,
                 "name": tile.name,
                 "type": str(tile.tile_type),
-                "transportType": str(tile.tile_type),
                 "ownerId": str(owner_id) if owner_id is not None else None,
-                "owner_id": str(owner_id) if owner_id is not None else None,
-                "building": tile_state.get("building_level", 0),
-                "buildingLevel": tile_state.get("building_level", 0),
+                "buildingLevel": tile_state.get("buildingLevel", 0),
                 "price": tile.price,
             }
         )
@@ -47,17 +43,16 @@ def serialize_game_snapshot(state: GameState) -> dict:
     for index, player in enumerate(players):
         serialized_players.append(
             {
-                "id": str(player["user_id"]),
+                "playerId": str(player["playerId"]),
                 "name": player["nickname"],
                 "nickname": player["nickname"],
-                "position": player["current_tile_id"],
+                "currentTileId": player["currentTileId"],
                 "balance": player["balance"],
-                "owned_tiles": player["owned_tile_ids"],
-                "is_in_jail": player["state"] == PlayerState.LOCKED,
-                "jail_turn_count": player["state_duration"],
-                "is_bankrupt": player["state"] == PlayerState.BANKRUPT,
-                "state": PLAYER_STATE_MAP.get(player["state"], "normal"),
-                "stateDuration": player["state_duration"],
+                "ownedTiles": player["ownedTiles"],
+                "isInJail": player["playerState"] == PlayerState.LOCKED,
+                "stateDuration": player["stateDuration"],
+                "isBankrupt": player["playerState"] == PlayerState.BANKRUPT,
+                "playerState": PLAYER_STATE_MAP.get(player["playerState"], "normal"),
                 "color": PLAYER_COLORS[index % len(PLAYER_COLORS)],
             }
         )
@@ -71,7 +66,6 @@ def serialize_game_snapshot(state: GameState) -> dict:
         "players": serialized_players,
         "tiles": tiles,
         "currentPlayerId": current_player_id,
-        "currentTurn": current_player_id,
         "round": state["round"],
         "turnTimeoutSec": TURN_TIMEOUT_SECONDS,
         "prompt": serialize_prompt(state.get("pending_prompt")),
@@ -89,9 +83,8 @@ def serialize_game_patch(
     return {
         "gameId": state["game_id"],
         "revision": state["revision"],
-        "turn": state["turn"],
+        "turn": state["turn"],  # 숫자 그대로 유지
         "events": events,
         "patch": [],
         "snapshot": serialize_game_snapshot(state) if include_snapshot else None,
     }
-

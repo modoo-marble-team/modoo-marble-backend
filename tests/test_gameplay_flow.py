@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from app.game.actions.end_turn import process_end_turn
 from app.game.actions.roll_dice import process_roll_dice
@@ -45,33 +45,56 @@ def make_state() -> dict:
         "pending_prompt": None,
         "players": {
             "1": {
-                "user_id": 1,
+                "playerId": 1,
                 "nickname": "host",
                 "balance": 5000,
-                "current_tile_id": 0,
-                "state": PlayerState.NORMAL,
-                "state_duration": 0,
-                "consecutive_doubles": 0,
-                "owned_tile_ids": [],
-                "building_levels": {},
-                "turn_order": 0,
+                "currentTileId": 0,
+                "playerState": PlayerState.NORMAL,
+                "stateDuration": 0,
+                "consecutiveDoubles": 0,
+                "ownedTiles": [],
+                "buildingLevels": {},
+                "turnOrder": 0,
             },
             "2": {
-                "user_id": 2,
+                "playerId": 2,
                 "nickname": "guest",
                 "balance": 5000,
-                "current_tile_id": 0,
-                "state": PlayerState.NORMAL,
-                "state_duration": 0,
-                "consecutive_doubles": 0,
-                "owned_tile_ids": [],
-                "building_levels": {},
-                "turn_order": 1,
+                "currentTileId": 0,
+                "playerState": PlayerState.NORMAL,
+                "stateDuration": 0,
+                "consecutiveDoubles": 0,
+                "ownedTiles": [],
+                "buildingLevels": {},
+                "turnOrder": 1,
             },
         },
         "tiles": {
-            str(tile_id): {"owner_id": None, "building_level": 0}
-            for tile_id in [1, 2, 4, 5, 6, 9, 11, 12, 13, 14, 15, 17, 18, 19, 21, 22, 23, 25, 26, 28, 29, 31]
+            str(tile_id): {"ownerId": None, "buildingLevel": 0}
+            for tile_id in [
+                1,
+                2,
+                4,
+                5,
+                6,
+                9,
+                11,
+                12,
+                13,
+                14,
+                15,
+                17,
+                18,
+                19,
+                21,
+                22,
+                23,
+                25,
+                26,
+                28,
+                29,
+                31,
+            ]
         },
     }
 
@@ -99,7 +122,7 @@ def test_minimum_gameplay_turn_rotation(monkeypatch):
         "LANDED",
     ]
     assert end_events[0]["type"] == "TURN_ENDED"
-    assert snapshot["players"][0]["position"] == 3
+    assert snapshot["players"][0]["currentTileId"] == 3
     assert snapshot["currentPlayerId"] == "2"
     assert snapshot["round"] == 1
 
@@ -133,9 +156,9 @@ def test_property_landing_creates_buy_prompt_and_purchase(monkeypatch):
     apply_patches(state, end_patches)
 
     assert any(event["type"] == "BOUGHT_PROPERTY" for event in prompt_events)
-    assert state["tiles"]["4"]["owner_id"] == 1
+    assert state["tiles"]["4"]["ownerId"] == 1
     assert state["players"]["1"]["balance"] == 4500
-    assert state["players"]["1"]["owned_tile_ids"] == [4]
+    assert state["players"]["1"]["ownedTiles"] == [4]
     assert end_events[0]["type"] == "TURN_ENDED"
     assert state["current_player_id"] == 2
     assert state["phase"] == "WAIT_ROLL"
@@ -143,8 +166,8 @@ def test_property_landing_creates_buy_prompt_and_purchase(monkeypatch):
 
 def test_owned_property_requires_toll_prompt_and_transfers_money(monkeypatch):
     state = make_state()
-    state["tiles"]["4"]["owner_id"] = 1
-    state["players"]["1"]["owned_tile_ids"] = [4]
+    state["tiles"]["4"]["ownerId"] = 1
+    state["players"]["1"]["ownedTiles"] = [4]
     state["current_player_id"] = 2
     dice_values = iter([2, 2])
 
@@ -180,8 +203,8 @@ def test_owned_property_requires_toll_prompt_and_transfers_money(monkeypatch):
 
 def test_sell_property_action_refunds_money_and_releases_tile():
     state = make_state()
-    state["tiles"]["4"]["owner_id"] = 1
-    state["players"]["1"]["owned_tile_ids"] = [4]
+    state["tiles"]["4"]["ownerId"] = 1
+    state["players"]["1"]["ownedTiles"] = [4]
 
     events, patches = process_sell_property_action(
         state,
@@ -193,13 +216,13 @@ def test_sell_property_action_refunds_money_and_releases_tile():
 
     assert any(event["type"] == "SOLD_PROPERTY" for event in events)
     assert state["players"]["1"]["balance"] == 5500
-    assert state["tiles"]["4"]["owner_id"] is None
-    assert state["players"]["1"]["owned_tile_ids"] == []
+    assert state["tiles"]["4"]["ownerId"] is None
+    assert state["players"]["1"]["ownedTiles"] == []
 
 
 def test_travel_prompt_moves_to_selected_tile_and_chains_into_tile_prompt():
     state = make_state()
-    state["players"]["1"]["current_tile_id"] = 16
+    state["players"]["1"]["currentTileId"] = 16
 
     travel_events, travel_patches = resolve_landing(state, 1, 16)
     apply_patches(state, travel_patches)
@@ -219,8 +242,7 @@ def test_travel_prompt_moves_to_selected_tile_and_chains_into_tile_prompt():
     apply_patches(state, response_patches)
 
     assert any(event["type"] == "PLAYER_MOVED" for event in response_events)
-    assert state["players"]["1"]["current_tile_id"] == 4
+    assert state["players"]["1"]["currentTileId"] == 4
     assert state["pending_prompt"] is not None
     assert state["pending_prompt"]["type"] == "BUY_OR_SKIP"
     assert state["phase"] == "WAIT_PROMPT"
-
