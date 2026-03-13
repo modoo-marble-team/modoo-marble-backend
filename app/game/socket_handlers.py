@@ -20,8 +20,8 @@ from app.game.state import (
     get_game_state,
     save_game_state,
 )
+from app.game.reconnect import mark_reconnected
 from app.game.timer import start_turn_timer
-from app.lobby.socket_handlers import register_lobby_handlers
 
 PROMPT_RESPONSE_ACK_TYPE = "PROMPT_RESPONSE"
 
@@ -30,7 +30,6 @@ def register_game_handlers(
     sio: socketio.AsyncServer,
     sid_to_user: dict[str, int],
 ) -> None:
-    register_lobby_handlers(sio, sid_to_user)
 
     async def emit_prompt_if_needed(state: dict) -> None:
         prompt_payload = serialize_prompt(state.get("pending_prompt"))
@@ -94,6 +93,24 @@ def register_game_handlers(
             return
 
         await sio.enter_room(sid, f"game:{game_id}")
+
+        # 재연결 시 30초 자동파산 타이머 취소
+        user_id = sid_to_user.get(sid)
+        if user_id is not None:
+            was_disconnected = await mark_reconnected(
+                game_id=game_id, user_id=user_id
+            )
+            if was_disconnected:
+                reconnect_event = {
+                    "type": ServerEventType.PLAYER_RECONNECTED,
+                    "playerId": user_id,
+                }
+                await sio.emit(
+                    "game:patch",
+                    serialize_game_patch(state, events=[reconnect_event]),
+                    room=f"game:{game_id}",
+                )
+
         await sio.emit(
             "game:patch",
             serialize_game_patch(

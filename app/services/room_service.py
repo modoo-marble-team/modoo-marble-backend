@@ -360,6 +360,15 @@ class RoomService:
             nicknames=nicknames,
         )
 
+        # 유저-게임 매핑 Redis에 저장 (재연결 시 사용)
+        redis = get_redis()
+        for player_id in player_ids:
+            await redis.set(
+                f"user:{player_id}:game",
+                str(game.id),
+                ex=ROOM_TTL_SECONDS,
+            )
+
         room["status"] = "playing"
         room["game_id"] = str(game.id)
         await self._save_room(room)
