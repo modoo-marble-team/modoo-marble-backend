@@ -46,3 +46,13 @@ class PatchOp(StrEnum):
     INC = "inc"
     PUSH = "push"
     REMOVE = "remove"
+
+
+class MoveTrigger(StrEnum):
+    DICE = "dice"
+    TRAVEL = "travel"
+
+
+class GameOverReason(StrEnum):
+    LAST_SURVIVOR = "LAST_SURVIVOR"
+    MAX_ROUND_REACHED = "MAX_ROUND_REACHED"
