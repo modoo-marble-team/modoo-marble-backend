@@ -27,6 +27,7 @@ class RoomCardResponse(BaseModel):
 
 class RoomListResponse(BaseModel):
     rooms: list[RoomCardResponse]
+    total: int = 0
 
 
 class RoomMemberResponse(BaseModel):
