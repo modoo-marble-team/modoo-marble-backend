@@ -56,16 +56,16 @@ def _make_initial_players(
     players: dict[str, PlayerGameState] = {}
     for order, uid in enumerate(player_ids):
         players[str(uid)] = PlayerGameState(
-            user_id=uid,
+            playerId=uid,
             nickname=nicknames.get(uid, "Unknown"),
-            balance=100,
-            current_tile_id=0,
-            state=PlayerState.NORMAL,
-            state_duration=0,
-            consecutive_doubles=0,
-            owned_tile_ids=[],
-            building_levels={},
-            turn_order=order,
+            balance=5000,
+            currentTileId=0,
+            playerState=PlayerState.NORMAL,
+            stateDuration=0,
+            consecutiveDoubles=0,
+            ownedTiles=[],
+            buildingLevels={},
+            turnOrder=order,
         )
     return players
 
@@ -76,8 +76,8 @@ def _make_initial_tiles() -> dict[str, TileGameState]:
     for tile in BOARD:
         if tile.tile_type == TileType.PROPERTY:
             tiles[str(tile.tile_id)] = TileGameState(
-                owner_id=None,
-                building_level=0,
+                ownerId=None,
+                buildingLevel=0,
             )
     return tiles
 

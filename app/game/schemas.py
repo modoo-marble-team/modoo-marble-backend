@@ -6,23 +6,23 @@ from typing import Any, TypedDict
 class PlayerGameState(TypedDict):
     """Redis에 저장되는 플레이어 1명의 상태"""
 
-    user_id: int
+    playerId: int
     nickname: str
-    balance: int  # 잔액 (만 단위). 초기 100
-    current_tile_id: int  # 현재 위치 타일 번호. 초기 0
-    state: str  # "NORMAL" 또는 "LOCKED"
-    state_duration: int  # 무인도 남은 턴 수
-    consecutive_doubles: int  # 연속 더블 횟수
-    owned_tile_ids: list[int]  # 소유한 타일 번호 목록
-    building_levels: dict[str, int]  # {"tile_id": 건물레벨}
-    turn_order: int  # 턴 순서 (0부터)
+    balance: int  # 잔액 (단위: 1). 초기 5000 → 표시 50억
+    currentTileId: int  # 현재 위치 타일 번호. 초기 0
+    playerState: str  # "NORMAL" 또는 "LOCKED"
+    stateDuration: int  # 무인도 남은 턴 수
+    consecutiveDoubles: int  # 연속 더블 횟수
+    ownedTiles: list[int]  # 소유한 타일 번호 목록
+    buildingLevels: dict[str, int]  # {"tile_id": 건물레벨}
+    turnOrder: int  # 턴 순서 (0부터)
 
 
 class TileGameState(TypedDict):
     """Redis에 저장되는 타일 1개의 상태 (PROPERTY만 사용)"""
 
-    owner_id: int | None
-    building_level: int  # 0~7
+    ownerId: int | None
+    buildingLevel: int  # 0~7
 
 
 class GameState(TypedDict):
