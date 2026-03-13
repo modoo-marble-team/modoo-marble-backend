@@ -47,7 +47,7 @@ def _make_initial_players(
     players: dict[str, PlayerGameState] = {}
     for order, uid in enumerate(player_ids):
         players[str(uid)] = PlayerGameState(
-            user_id=uid,
+            playerId=uid,
             nickname=nicknames.get(uid, "Unknown"),
             balance=INITIAL_BALANCE,
             current_tile_id=0,
@@ -66,8 +66,8 @@ def _make_initial_tiles() -> dict[str, TileGameState]:
     for tile in BOARD:
         if tile.tile_type == TileType.PROPERTY:
             tiles[str(tile.tile_id)] = TileGameState(
-                owner_id=None,
-                building_level=0,
+                ownerId=None,
+                buildingLevel=0,
             )
     return tiles
 
@@ -97,6 +97,7 @@ async def init_game_state(
 
 
 async def get_game_state(game_id: str) -> GameState | None:
+    """Redis에서 게임 상태를 읽어온다. 없으면 None."""
     redis = get_redis()
     raw = await redis.get(_game_key(game_id))
     if raw is None:
@@ -105,6 +106,7 @@ async def get_game_state(game_id: str) -> GameState | None:
 
 
 async def save_game_state(game_id: str, state: GameState) -> None:
+    """수정된 게임 상태를 Redis에 다시 저장한다."""
     redis = get_redis()
     await redis.set(_game_key(game_id), json.dumps(state), ex=GAME_STATE_TTL)
 
