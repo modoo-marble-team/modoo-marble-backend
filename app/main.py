@@ -10,11 +10,12 @@ from starlette.middleware.cors import CORSMiddleware
 from tortoise import Tortoise
 
 from app.config import TORTOISE_ORM, settings
+from app.errors import register_error_handlers
 from app.game.socket_handlers import register_game_handlers
 from app.models.user import User
-from app.presence import set_offline, set_online
+from app.presence import list_online, set_offline, set_online
 from app.redis_client import close_redis, init_redis
-from app.routers import auth, users
+from app.routers import auth, game, lobby, users
 from app.utils.jwt import decode_token
 
 # 로깅 라이브러리
@@ -34,8 +35,8 @@ register_game_handlers(sio, _sid_to_user)
 
 async def _broadcast_user_status(user_id: int, nickname: str, status: str) -> None:
     await sio.emit(
-        "user_status_changed",
-        {"id": user_id, "nickname": nickname, "status": status},
+        "online_users",
+        {"users": await list_online()},
     )
 
 
@@ -112,6 +113,9 @@ app = FastAPI(
     redoc_url="/redoc",  # ReDoc 주소 (읽기 전용)
     lifespan=lifespan,  # 시작/종료 함수 등록
 )
+app.state.sio = sio
+app.state.sid_to_user = _sid_to_user
+register_error_handlers(app)
 
 
 def custom_openapi():
@@ -152,13 +156,20 @@ app.add_middleware(  # app에 미들웨어 추가 (FastAPI 내장 메서드)
     allow_headers=["*"],  # 모든 헤더 허용
 )
 
-app.include_router(auth.router, prefix="/v1/auth", tags=["Auth"])
-app.include_router(users.router, prefix="/v1", tags=["Users"])
+app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
+app.include_router(users.router, prefix="/api", tags=["Users"])
+app.include_router(lobby.router, prefix="/api", tags=["Lobby"])
+app.include_router(game.router, prefix="/api", tags=["Game"])
 
 
 # 헬스체크
 @app.get("/health", tags=["System"])
 async def health_check():
+    return {"status": "ok", "title": app.title, "version": app.version}
+
+
+@app.get("/api/health", tags=["System"])
+async def api_health_check():
     return {"status": "ok", "title": app.title, "version": app.version}
 
 
