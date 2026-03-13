@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from copy import deepcopy
+import copy
 from uuid import uuid4
 
 from app.game.board import BOARD_SIZE, ISLAND_TILE_ID, TILE_MAP, TileType
@@ -13,6 +13,11 @@ PHASE_WAIT_ROLL = "WAIT_ROLL"
 PHASE_RESOLVING = "RESOLVING"
 PHASE_WAIT_PROMPT = "WAIT_PROMPT"
 PHASE_GAME_OVER = "GAME_OVER"
+
+# 건물 매각 환불 비율 — 건축 비용 대비
+SELL_REFUND_RATE_TIER_1_3 = 0.5  # 레벨 1~3: 건축 비용의 50% 환불
+SELL_REFUND_RATE_TIER_4_5 = 1.0  # 레벨 4~5: 건축 비용의 100% 환불
+SELL_REFUND_MULTIPLIER_TIER_6 = 2  # 레벨 6: 건축 비용의 200% 환불
 
 PROMPT_TIMEOUT_SECONDS = 30
 
@@ -172,11 +177,11 @@ def _get_sell_refund(tile_id: int, building_level: int) -> int:
     refund = base_price
     for current_level in range(1, building_level):
         if current_level in (1, 2, 3):
-            refund += int(base_price * 0.5)
+            refund += int(base_price * SELL_REFUND_RATE_TIER_1_3)
         elif current_level in (4, 5):
-            refund += base_price
+            refund += int(base_price * SELL_REFUND_RATE_TIER_4_5)
         elif current_level == 6:
-            refund += base_price * 2
+            refund += base_price * SELL_REFUND_MULTIPLIER_TIER_6
 
     return refund
 
@@ -759,7 +764,11 @@ def process_prompt_response(
         )
         _append_landed_event(events, player_id=player_id, tile_id=target_tile_id)
 
-        preview_state = deepcopy(state)
+        preview_state = {
+            **state,
+            "players": copy.deepcopy(state["players"]),
+            "tiles": copy.deepcopy(state["tiles"]),
+        }
         apply_patches(preview_state, patches)
         landing_events, landing_patches = resolve_landing(
             preview_state, player_id, target_tile_id
