@@ -106,7 +106,9 @@ async def leave_room(
     await _emit_lobby_updated(request, "updated", room)
     await _emit_room_updated(request, room)
     if new_host_id:
-        new_host = next(player for player in room["players"] if player["id"] == new_host_id)
+        new_host = next(
+            player for player in room["players"] if player["id"] == new_host_id
+        )
         await request.app.state.sio.emit(
             "host_changed",
             {
@@ -161,6 +163,8 @@ async def start_room_game(
     }
     await request.app.state.sio.emit("game_start", payload, room=f"room:{room_id}")
     for player in room["players"]:
-        await request.app.state.sio.emit("game_start", payload, room=f"user:{player['id']}")
+        await request.app.state.sio.emit(
+            "game_start", payload, room=f"user:{player['id']}"
+        )
 
     return {"success": True, "game_id": game_state["game_id"]}

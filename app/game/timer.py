@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 
@@ -68,9 +68,7 @@ def start_turn_timer(game_id: str, sio: socketio.AsyncServer) -> None:
     _timers[game_id] = task
 
 
-
 def cancel_turn_timer(game_id: str) -> None:
     task = _timers.pop(game_id, None)
     if task and not task.done():
         task.cancel()
-
