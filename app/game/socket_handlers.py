@@ -5,10 +5,8 @@ import structlog
 
 from app.game.actions.end_turn import process_end_turn
 from app.game.actions.roll_dice import process_roll_dice
-from app.game.enums import ActionType, ServerEventType
+from app.game.enums import ActionType
 from app.game.errors import GameActionError
-from app.game.presentation import serialize_game_patch
-from app.game.reconnect import mark_reconnected
 from app.game.rules import (
     process_buy_property_action,
     process_prompt_response,
@@ -22,7 +20,9 @@ from app.game.state import (
     get_game_state,
     save_game_state,
 )
+from app.game.sync_runtime import init_game_sync_runtime
 from app.game.timer import start_turn_timer
+from app.services.room_service import RoomService
 
 logger = structlog.get_logger()
 
@@ -49,6 +49,9 @@ def register_game_handlers(
     sio: socketio.AsyncServer,
     sid_to_user: dict[str, int],
 ) -> None:
+    room_service = RoomService()
+    sync_runtime = init_game_sync_runtime(sio)
+
     async def emit_prompt_if_needed(state: dict) -> None:
         prompt_payload = serialize_prompt(state.get("pending_prompt"))
         if not prompt_payload:
@@ -80,10 +83,87 @@ def register_game_handlers(
             "promptId": prompt_id,
         }
 
+    @sio.on("enter_room")
+    async def enter_room(sid: str, data: dict) -> None:
+        user_id = sid_to_user.get(sid)
+        room_id = str(data.get("room_id") or "")
+
+        if user_id is None:
+            await sio.emit(
+                "game:error",
+                {"code": "AUTH_REQUIRED", "message": "Authentication required."},
+                to=sid,
+            )
+            return
+
+        room = await room_service.get_room(room_id)
+        if room is None:
+            await sio.emit(
+                "game:error",
+                {"code": "ROOM_NOT_FOUND", "message": "Room not found."},
+                to=sid,
+            )
+            return
+
+        if not any(player["id"] == str(user_id) for player in room["players"]):
+            await sio.emit(
+                "game:error",
+                {"code": "NOT_ROOM_MEMBER", "message": "You are not in this room."},
+                to=sid,
+            )
+            return
+
+        await sio.enter_room(sid, f"room:{room_id}")
+
+    @sio.on("leave_room")
+    async def leave_room(sid: str, data: dict) -> None:
+        room_id = str(data.get("room_id") or "")
+        if room_id:
+            await sio.leave_room(sid, f"room:{room_id}")
+
+    @sio.on("send_chat")
+    async def send_chat(sid: str, data: dict) -> None:
+        user_id = sid_to_user.get(sid)
+        room_id = str(data.get("room_id") or "")
+        message = str(data.get("message") or "").strip()
+
+        if user_id is None:
+            await sio.emit(
+                "game:error",
+                {"code": "AUTH_REQUIRED", "message": "Authentication required."},
+                to=sid,
+            )
+            return
+
+        if not room_id or not message:
+            return
+
+        _room, chat_message = await room_service.add_chat_message(
+            room_id=room_id,
+            user_id=user_id,
+            message=message,
+        )
+        await sio.emit(
+            "chat", {"room_id": room_id, **chat_message}, room=f"room:{room_id}"
+        )
+
     @sio.on("game:sync")
     async def game_sync(sid: str, data: dict) -> None:
-        game_id = data.get("gameId")
-        known_revision = data.get("knownRevision", -1)
+        user_id = sid_to_user.get(sid)
+        game_id = str((data or {}).get("gameId") or "")
+        known_revision_raw = (data or {}).get("knownRevision", -1)
+
+        if user_id is None:
+            await sio.emit(
+                "game:error",
+                {
+                    "gameId": game_id or None,
+                    "code": "AUTH_REQUIRED",
+                    "message": "Authentication required.",
+                },
+                to=sid,
+            )
+            return
 
         if not game_id:
             await sio.emit(
@@ -97,51 +177,28 @@ def register_game_handlers(
             )
             return
 
-        state = await get_game_state(game_id)
-        if state is None:
+        try:
+            known_revision = int(known_revision_raw)
+        except (TypeError, ValueError):
             await sio.emit(
                 "game:error",
                 {
                     "gameId": game_id,
-                    "code": "GAME_NOT_FOUND",
-                    "message": "Game not found.",
+                    "code": "DESYNC",
+                    "message": "knownRevision 값이 올바르지 않습니다.",
                 },
                 to=sid,
             )
             return
 
-        await sio.enter_room(sid, f"game:{game_id}")
-
-        # 재연결 시 30초 자동파산 타이머 취소
-        user_id = sid_to_user.get(sid)
-        if user_id is not None:
-            was_disconnected = await mark_reconnected(game_id=game_id, user_id=user_id)
-            if was_disconnected:
-                reconnect_event = {
-                    "type": ServerEventType.PLAYER_RECONNECTED,
-                    "playerId": user_id,
-                }
-                await sio.emit(
-                    "game:patch",
-                    serialize_game_patch(state, events=[reconnect_event]),
-                    room=f"game:{game_id}",
-                )
-
-        await sio.emit(
-            "game:patch",
-            serialize_game_patch(
-                state,
-                events=[
-                    {
-                        "type": ServerEventType.SYNCED,
-                        "knownRevision": known_revision,
-                        "currentRevision": state["revision"],
-                    }
-                ],
-            ),
-            to=sid,
+        state = await sync_runtime.handle_sync(
+            sid=sid,
+            user_id=user_id,
+            game_id=game_id,
+            known_revision=known_revision,
         )
-        await emit_prompt_if_needed(state)
+        if state is not None:
+            await emit_prompt_if_needed(state)
 
     @sio.on("game:action")
     async def handle_game_action(sid: str, data: dict) -> None:
@@ -158,6 +215,8 @@ def register_game_handlers(
         action_id = data.get("actionId", "")
         action_type = data.get("type")
         state = None
+        events: list[dict] = []
+        patches: list[dict] = []
 
         if not game_id or not action_type:
             await sio.emit(
@@ -173,6 +232,22 @@ def register_game_handlers(
                 to=sid,
             )
             return
+
+        client_revision = None
+        if "knownRevision" in data:
+            try:
+                client_revision = int(data.get("knownRevision"))
+            except (TypeError, ValueError):
+                await sio.emit(
+                    "game:error",
+                    {
+                        "gameId": game_id,
+                        "code": "DESYNC",
+                        "message": "knownRevision 값이 올바르지 않습니다.",
+                    },
+                    to=sid,
+                )
+                return
 
         try:
             async with game_lock(game_id):
@@ -192,13 +267,24 @@ def register_game_handlers(
                     )
                     return
 
-                all_patches: list[dict] = []
+                if (
+                    client_revision is not None
+                    and int(state.get("revision", -1)) != client_revision
+                ):
+                    await sio.emit(
+                        "game:error",
+                        {
+                            "gameId": game_id,
+                            "code": "DESYNC",
+                            "message": "클라이언트 상태가 오래됐습니다.",
+                        },
+                        to=sid,
+                    )
+                    return
 
                 if action_type == ActionType.ROLL_DICE:
                     events, patches = process_roll_dice(state, user_id)
                     apply_patches(state, patches)
-                    all_patches.extend(patches)
-
                     if (
                         state.get("pending_prompt") is None
                         and state["status"] == "playing"
@@ -206,7 +292,7 @@ def register_game_handlers(
                         end_events, end_patches = process_end_turn(state, user_id)
                         apply_patches(state, end_patches)
                         events.extend(end_events)
-                        all_patches.extend(end_patches)
+                        patches.extend(end_patches)
                 elif action_type == ActionType.BUY_PROPERTY:
                     payload = (
                         data.get("payload")
@@ -220,8 +306,6 @@ def register_game_handlers(
                         tile_id=tile_id,
                     )
                     apply_patches(state, patches)
-                    all_patches.extend(patches)
-
                     if (
                         state.get("pending_prompt") is None
                         and state["status"] == "playing"
@@ -229,7 +313,7 @@ def register_game_handlers(
                         end_events, end_patches = process_end_turn(state, user_id)
                         apply_patches(state, end_patches)
                         events.extend(end_events)
-                        all_patches.extend(end_patches)
+                        patches.extend(end_patches)
                 elif action_type == ActionType.SELL_PROPERTY:
                     payload = (
                         data.get("payload")
@@ -251,8 +335,6 @@ def register_game_handlers(
                         building_level=building_level,
                     )
                     apply_patches(state, patches)
-                    all_patches.extend(patches)
-
                     if (
                         state.get("pending_prompt") is None
                         and state["status"] == "playing"
@@ -260,11 +342,10 @@ def register_game_handlers(
                         end_events, end_patches = process_end_turn(state, user_id)
                         apply_patches(state, end_patches)
                         events.extend(end_events)
-                        all_patches.extend(end_patches)
+                        patches.extend(end_patches)
                 elif action_type == ActionType.END_TURN:
                     events, patches = process_end_turn(state, user_id)
                     apply_patches(state, patches)
-                    all_patches.extend(patches)
                 else:
                     await sio.emit(
                         "game:ack",
@@ -282,6 +363,9 @@ def register_game_handlers(
 
                 state["revision"] += 1
                 await save_game_state(game_id, state)
+                await sync_runtime.set_active_game(
+                    user_id=user_id, game_id=str(game_id)
+                )
 
                 if state["status"] == "finished":
                     await _revert_players_to_lobby(state)
@@ -315,6 +399,13 @@ def register_game_handlers(
             )
             return
 
+        packet = await sync_runtime.build_and_store_patch_packet(
+            state=state,
+            events=events,
+            patch=patches,
+            include_snapshot=False,
+        )
+
         if state["status"] == "playing":
             start_turn_timer(game_id, sio)
 
@@ -330,11 +421,7 @@ def register_game_handlers(
             },
             to=sid,
         )
-        await sio.emit(
-            "game:patch",
-            serialize_game_patch(state, events=events, patches=all_patches),
-            room=f"game:{game_id}",
-        )
+        await sio.emit("game:patch", packet, room=f"game:{game_id}")
         await emit_prompt_if_needed(state)
 
     @sio.on("game:prompt_response")
@@ -354,6 +441,8 @@ def register_game_handlers(
         payload = data.get("payload") if isinstance(data.get("payload"), dict) else None
         action_id = f"prompt:{prompt_id}" if prompt_id else "prompt:unknown"
         state = None
+        events: list[dict] = []
+        patches: list[dict] = []
 
         if not game_id or not prompt_id or not choice:
             await sio.emit(
@@ -370,6 +459,22 @@ def register_game_handlers(
                 to=sid,
             )
             return
+
+        client_revision = None
+        if "knownRevision" in data:
+            try:
+                client_revision = int(data.get("knownRevision"))
+            except (TypeError, ValueError):
+                await sio.emit(
+                    "game:error",
+                    {
+                        "gameId": game_id,
+                        "code": "DESYNC",
+                        "message": "knownRevision 값이 올바르지 않습니다.",
+                    },
+                    to=sid,
+                )
+                return
 
         try:
             async with game_lock(game_id):
@@ -390,6 +495,21 @@ def register_game_handlers(
                     )
                     return
 
+                if (
+                    client_revision is not None
+                    and int(state.get("revision", -1)) != client_revision
+                ):
+                    await sio.emit(
+                        "game:error",
+                        {
+                            "gameId": game_id,
+                            "code": "DESYNC",
+                            "message": "클라이언트 상태가 오래됐습니다.",
+                        },
+                        to=sid,
+                    )
+                    return
+
                 events, patches = process_prompt_response(
                     state,
                     player_id=user_id,
@@ -398,16 +518,18 @@ def register_game_handlers(
                     payload=payload,
                 )
                 apply_patches(state, patches)
-                all_patches = list(patches)
 
                 if state["status"] == "playing" and state.get("pending_prompt") is None:
                     end_events, end_patches = process_end_turn(state, user_id)
                     apply_patches(state, end_patches)
                     events.extend(end_events)
-                    all_patches.extend(end_patches)
+                    patches.extend(end_patches)
 
                 state["revision"] += 1
                 await save_game_state(game_id, state)
+                await sync_runtime.set_active_game(
+                    user_id=user_id, game_id=str(game_id)
+                )
 
                 if state["status"] == "finished":
                     await _revert_players_to_lobby(state)
@@ -443,6 +565,13 @@ def register_game_handlers(
             )
             return
 
+        packet = await sync_runtime.build_and_store_patch_packet(
+            state=state,
+            events=events,
+            patch=patches,
+            include_snapshot=False,
+        )
+
         if state["status"] == "playing":
             start_turn_timer(game_id, sio)
 
@@ -459,9 +588,5 @@ def register_game_handlers(
             },
             to=sid,
         )
-        await sio.emit(
-            "game:patch",
-            serialize_game_patch(state, events=events, patches=all_patches),
-            room=f"game:{game_id}",
-        )
+        await sio.emit("game:patch", packet, room=f"game:{game_id}")
         await emit_prompt_if_needed(state)

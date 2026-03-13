@@ -32,6 +32,16 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:5173"]
 
+    GAME_SYNC_DISCONNECT_GRACE_SECONDS: int = 30
+    GAME_SYNC_TIMER_CLAIM_TTL_SECONDS: int = 3
+    GAME_SYNC_DISCONNECT_SCHEDULE_SHARDS: int = 16
+    GAME_SYNC_WORKER_POLL_INTERVAL_SECONDS: int = 1
+    GAME_SYNC_WORKER_BATCH_SIZE: int = 100
+    GAME_SYNC_WORKER_CONCURRENCY: int = 20
+    GAME_SYNC_WORKER_COUNT: int = 10
+    GAME_SYNC_LEADER_TTL_SECONDS: int = 5
+    GAME_SYNC_PATCH_KEEP_COUNT: int = 200
+
 
 settings = Settings()
 

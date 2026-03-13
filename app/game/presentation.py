@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from typing import Any
+
 from app.game.board import BOARD
 from app.game.enums import PlayerState
 from app.game.rules import PHASE_GAME_OVER, serialize_prompt
-from app.game.schemas import GameState
+from app.game.schemas import GameState, PlayerGameState
 from app.game.timer import TURN_TIMEOUT_SECONDS
 
 PLAYER_COLORS = ["#EF5350", "#42A5F5", "#66BB6A", "#FFD15B"]
@@ -13,9 +15,81 @@ PLAYER_STATE_MAP = {
     PlayerState.BANKRUPT: "bankrupt",
 }
 
+NETWORK_KEY_MAP = {
+    "player_id": "playerId",
+    "next_player_id": "nextPlayerId",
+    "from_tile_id": "fromTileId",
+    "to_tile_id": "toTileId",
+    "tile_id": "tileId",
+    "owner_id": "ownerId",
+    "current_tile_id": "currentTileId",
+    "current_player_id": "currentPlayerId",
+    "owned_tile_ids": "ownedTiles",
+    "owned_tiles": "ownedTiles",
+    "building_level": "buildingLevel",
+    "state_duration": "stateDuration",
+    "known_revision": "knownRevision",
+    "current_revision": "currentRevision",
+    "winner_player_id": "winnerPlayerId",
+}
 
-def _ordered_players(state: GameState) -> list[dict]:
+PATCH_PATH_MAP = {
+    "current_tile_id": "currentTileId",
+    "current_player_id": "currentPlayerId",
+    "owned_tile_ids": "ownedTiles",
+    "owner_id": "ownerId",
+    "building_level": "buildingLevel",
+    "state_duration": "stateDuration",
+}
+
+
+def _ordered_players(state: GameState) -> list[PlayerGameState]:
     return sorted(state["players"].values(), key=lambda player: player["turnOrder"])
+
+
+def _normalize_scalar(value: Any) -> Any:
+    if hasattr(value, "value"):
+        return value.value
+    return value
+
+
+def _normalize_key(key: str) -> str:
+    return NETWORK_KEY_MAP.get(key, key)
+
+
+def _normalize_payload(value: Any) -> Any:
+    if isinstance(value, dict):
+        normalized: dict[str, Any] = {}
+        for key, item in value.items():
+            out_key = _normalize_key(str(key))
+            if key == "state":
+                out_key = "playerState"
+            normalized[out_key] = _normalize_payload(item)
+        return normalized
+
+    if isinstance(value, list):
+        return [_normalize_payload(item) for item in value]
+
+    return _normalize_scalar(value)
+
+
+def _normalize_patch_path(path: str) -> str:
+    return ".".join(PATCH_PATH_MAP.get(part, part) for part in path.split("."))
+
+
+def _serialize_patch_ops(patch: list[dict] | None) -> list[dict]:
+    serialized: list[dict] = []
+
+    for item in patch or []:
+        payload = {
+            "op": _normalize_scalar(item.get("op")),
+            "path": _normalize_patch_path(str(item.get("path", ""))),
+        }
+        if "value" in item:
+            payload["value"] = _normalize_payload(item.get("value"))
+        serialized.append(payload)
+
+    return serialized
 
 
 def serialize_game_snapshot(state: GameState) -> dict:
@@ -44,6 +118,7 @@ def serialize_game_snapshot(state: GameState) -> dict:
         serialized_players.append(
             {
                 "playerId": str(player["playerId"]),
+                "name": player["nickname"],
                 "nickname": player["nickname"],
                 "currentTileId": player["currentTileId"],
                 "balance": player["balance"],
@@ -69,9 +144,7 @@ def serialize_game_snapshot(state: GameState) -> dict:
         "turnTimeoutSec": TURN_TIMEOUT_SECONDS,
         "prompt": serialize_prompt(state.get("pending_prompt")),
         "isGameOver": state["status"] != "playing",
-        "winnerId": str(state["winnerId"])
-        if state.get("winnerId") is not None
-        else None,
+        "winnerId": None,
     }
 
 
@@ -79,14 +152,14 @@ def serialize_game_patch(
     state: GameState,
     *,
     events: list[dict],
-    patches: list[dict] | None = None,
+    patch: list[dict] | None = None,
     include_snapshot: bool = True,
 ) -> dict:
     return {
         "gameId": state["game_id"],
         "revision": state["revision"],
-        "turn": state["turn"],  # 숫자 그대로 유지
-        "events": events,
-        "patch": patches or [],
+        "turn": state["turn"],
+        "events": [_normalize_payload(event) for event in events],
+        "patch": _serialize_patch_ops(patch),
         "snapshot": serialize_game_snapshot(state) if include_snapshot else None,
     }
