@@ -25,7 +25,6 @@ NETWORK_KEY_MAP = {
     "current_tile_id": "currentTileId",
     "current_player_id": "currentPlayerId",
     "owned_tile_ids": "ownedTiles",
-    "owned_tiles": "ownedTiles",
     "building_level": "buildingLevel",
     "state_duration": "stateDuration",
     "known_revision": "knownRevision",

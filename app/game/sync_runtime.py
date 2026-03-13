@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import time
 import uuid
@@ -77,7 +78,9 @@ class GameSyncRuntime:
 
     def _schedule_shard(self, game_id: str, player_id: int) -> int:
         shard_count = max(settings.GAME_SYNC_DISCONNECT_SCHEDULE_SHARDS, 1)
-        return hash(f"{game_id}:{player_id}") % shard_count
+        raw = f"{game_id}:{player_id}".encode()
+        digest = hashlib.md5(raw).hexdigest()
+        return int(digest, 16) % shard_count
 
     def _now_ts(self) -> float:
         return time.time()
@@ -108,7 +111,7 @@ class GameSyncRuntime:
         player = state["players"].get(str(user_id))
         if player is None:
             return
-        if player.get("state") == PlayerState.BANKRUPT:
+        if player.get("playerState") == PlayerState.BANKRUPT:
             return
 
         await self.set_disconnected_at(game_id=game_id, player_id=user_id)
@@ -370,9 +373,6 @@ class GameSyncRuntime:
             except asyncio.QueueEmpty:
                 break
 
-    async def restore_disconnect_watchers(self) -> None:
-        return
-
     async def _emit_desync(
         self,
         *,
@@ -581,7 +581,7 @@ class GameSyncRuntime:
                         player_id=player_id,
                     )
                     return
-                if player.get("state") == PlayerState.BANKRUPT:
+                if player.get("playerState") == PlayerState.BANKRUPT:
                     await self.clear_disconnected_at(
                         game_id=game_id,
                         player_id=player_id,
@@ -602,7 +602,7 @@ class GameSyncRuntime:
                 alive_players = self._active_players(state)
                 if len(alive_players) <= 1:
                     winner_player_id = (
-                        alive_players[0]["user_id"] if alive_players else None
+                        alive_players[0]["playerId"] if alive_players else None
                     )
                     state["status"] = "finished"
                     state["phase"] = PHASE_GAME_OVER
@@ -656,9 +656,9 @@ class GameSyncRuntime:
         reason: str,
     ) -> None:
         player = state["players"][str(player_id)]
-        player["state"] = PlayerState.BANKRUPT
-        player["state_duration"] = 0
-        player["consecutive_doubles"] = 0
+        player["playerState"] = PlayerState.BANKRUPT
+        player["stateDuration"] = 0
+        player["consecutiveDoubles"] = 0
 
         patch.extend(
             [
@@ -680,13 +680,13 @@ class GameSyncRuntime:
             ]
         )
 
-        owned_tile_ids = list(player.get("owned_tile_ids", []))
+        owned_tile_ids = list(player.get("ownedTiles", []))
         for tile_id in owned_tile_ids:
             tile_state = state["tiles"].get(str(tile_id))
             if tile_state is None:
                 continue
-            tile_state["owner_id"] = None
-            tile_state["building_level"] = 0
+            tile_state["ownerId"] = None
+            tile_state["buildingLevel"] = 0
             patch.extend(
                 [
                     {
@@ -702,11 +702,11 @@ class GameSyncRuntime:
                 ]
             )
 
-        player["owned_tile_ids"] = []
+        player["ownedTiles"] = []
         patch.append(
             {
                 "op": "set",
-                "path": f"players.{player_id}.owned_tile_ids",
+                "path": f"players.{player_id}.ownedTiles",
                 "value": [],
             }
         )
@@ -757,15 +757,15 @@ class GameSyncRuntime:
             )
             return
 
-        current_order = state["players"][str(player_id)]["turn_order"]
+        current_order = state["players"][str(player_id)]["turnOrder"]
         next_player = active_players[0]
         for candidate in active_players:
-            if candidate["turn_order"] > current_order:
+            if candidate["turnOrder"] > current_order:
                 next_player = candidate
                 break
 
-        next_player_id = next_player["user_id"]
-        next_order = next_player["turn_order"]
+        next_player_id = next_player["playerId"]
+        next_order = next_player["turnOrder"]
         new_turn = state["turn"] + 1
         new_round = (
             state["round"] + 1 if next_order <= current_order else state["round"]
@@ -801,9 +801,9 @@ class GameSyncRuntime:
             [
                 player
                 for player in state["players"].values()
-                if player.get("state") != PlayerState.BANKRUPT
+                if player.get("playerState") != PlayerState.BANKRUPT
             ],
-            key=lambda player: player["turn_order"],
+            key=lambda player: player["turnOrder"],
         )
 
 
@@ -839,9 +839,3 @@ async def stop_game_sync_scheduler() -> None:
     if _runtime is None:
         return
     await _runtime.stop_scheduler()
-
-
-async def restore_game_sync_watchers() -> None:
-    if _runtime is None:
-        return
-    await _runtime.restore_disconnect_watchers()
