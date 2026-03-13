@@ -15,7 +15,6 @@ from app.game.socket_handlers import register_game_handlers
 from app.game.sync_runtime import (
     handle_game_socket_connect,
     handle_game_socket_disconnect,
-    restore_game_sync_watchers,
     start_game_sync_scheduler,
     stop_game_sync_scheduler,
 )
@@ -107,7 +106,6 @@ async def lifespan(app: FastAPI):
 
     await init_redis()
     await start_game_sync_scheduler()
-    await restore_game_sync_watchers()
     logger.info("✅ DB/Redis 연결이 완료되었습니다.")
 
     yield

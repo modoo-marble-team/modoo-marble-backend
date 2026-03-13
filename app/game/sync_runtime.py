@@ -38,7 +38,7 @@ class GameSyncRuntime:
             * settings.GAME_SYNC_WORKER_BATCH_SIZE
         )
         self._instance_id = str(uuid.uuid4())
-        self._leader_script = None
+        self._leader_script: Any = None
 
     def _patchlog_key(self, game_id: str) -> str:
         return f"game:{game_id}:patchlog"
@@ -362,6 +362,13 @@ class GameSyncRuntime:
             except asyncio.CancelledError:
                 pass
         self._worker_tasks = []
+
+        while not self._disconnect_queue.empty():
+            try:
+                self._disconnect_queue.get_nowait()
+                self._disconnect_queue.task_done()
+            except asyncio.QueueEmpty:
+                break
 
     async def restore_disconnect_watchers(self) -> None:
         return

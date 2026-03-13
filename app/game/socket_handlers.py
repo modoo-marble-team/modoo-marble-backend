@@ -64,6 +64,49 @@ def register_game_handlers(
             "promptId": prompt_id,
         }
 
+    async def emit_desync_error(
+        *,
+        sid: str,
+        game_id: str | None,
+        message: str = "knownRevision 값이 올바르지 않습니다.",
+    ) -> None:
+        await sio.emit(
+            "game:error",
+            {
+                "gameId": game_id,
+                "code": "DESYNC",
+                "message": message,
+            },
+            to=sid,
+        )
+
+    async def parse_known_revision(
+        *,
+        sid: str,
+        data: dict,
+        game_id: str | None,
+    ) -> int | None:
+        if "knownRevision" not in data:
+            return None
+
+        try:
+            return int(data.get("knownRevision"))
+        except (TypeError, ValueError):
+            await emit_desync_error(sid=sid, game_id=game_id)
+            return None
+
+    def maybe_end_turn(
+        state: dict,
+        user_id: int,
+        events: list[dict],
+        patches: list[dict],
+    ) -> None:
+        if state.get("pending_prompt") is None and state["status"] == "playing":
+            end_events, end_patches = process_end_turn(state, user_id)
+            apply_patches(state, end_patches)
+            events.extend(end_events)
+            patches.extend(end_patches)
+
     @sio.on("enter_room")
     async def enter_room(sid: str, data: dict) -> None:
         user_id = sid_to_user.get(sid)
@@ -161,15 +204,7 @@ def register_game_handlers(
         try:
             known_revision = int(known_revision_raw)
         except (TypeError, ValueError):
-            await sio.emit(
-                "game:error",
-                {
-                    "gameId": game_id,
-                    "code": "DESYNC",
-                    "message": "knownRevision 값이 올바르지 않습니다.",
-                },
-                to=sid,
-            )
+            await emit_desync_error(sid=sid, game_id=game_id)
             return
 
         state = await sync_runtime.handle_sync(
@@ -214,21 +249,13 @@ def register_game_handlers(
             )
             return
 
-        client_revision = None
-        if "knownRevision" in data:
-            try:
-                client_revision = int(data.get("knownRevision"))
-            except (TypeError, ValueError):
-                await sio.emit(
-                    "game:error",
-                    {
-                        "gameId": game_id,
-                        "code": "DESYNC",
-                        "message": "knownRevision 값이 올바르지 않습니다.",
-                    },
-                    to=sid,
-                )
-                return
+        client_revision = await parse_known_revision(
+            sid=sid,
+            data=data,
+            game_id=game_id,
+        )
+        if "knownRevision" in data and client_revision is None:
+            return
 
         try:
             async with game_lock(game_id):
@@ -252,28 +279,17 @@ def register_game_handlers(
                     client_revision is not None
                     and int(state.get("revision", -1)) != client_revision
                 ):
-                    await sio.emit(
-                        "game:error",
-                        {
-                            "gameId": game_id,
-                            "code": "DESYNC",
-                            "message": "클라이언트 상태가 오래됐습니다.",
-                        },
-                        to=sid,
+                    await emit_desync_error(
+                        sid=sid,
+                        game_id=game_id,
+                        message="클라이언트 상태가 오래됐습니다.",
                     )
                     return
 
                 if action_type == ActionType.ROLL_DICE:
                     events, patches = process_roll_dice(state, user_id)
                     apply_patches(state, patches)
-                    if (
-                        state.get("pending_prompt") is None
-                        and state["status"] == "playing"
-                    ):
-                        end_events, end_patches = process_end_turn(state, user_id)
-                        apply_patches(state, end_patches)
-                        events.extend(end_events)
-                        patches.extend(end_patches)
+                    maybe_end_turn(state, user_id, events, patches)
                 elif action_type == ActionType.BUY_PROPERTY:
                     payload = (
                         data.get("payload")
@@ -287,14 +303,7 @@ def register_game_handlers(
                         tile_id=tile_id,
                     )
                     apply_patches(state, patches)
-                    if (
-                        state.get("pending_prompt") is None
-                        and state["status"] == "playing"
-                    ):
-                        end_events, end_patches = process_end_turn(state, user_id)
-                        apply_patches(state, end_patches)
-                        events.extend(end_events)
-                        patches.extend(end_patches)
+                    maybe_end_turn(state, user_id, events, patches)
                 elif action_type == ActionType.SELL_PROPERTY:
                     payload = (
                         data.get("payload")
@@ -316,14 +325,7 @@ def register_game_handlers(
                         building_level=building_level,
                     )
                     apply_patches(state, patches)
-                    if (
-                        state.get("pending_prompt") is None
-                        and state["status"] == "playing"
-                    ):
-                        end_events, end_patches = process_end_turn(state, user_id)
-                        apply_patches(state, end_patches)
-                        events.extend(end_events)
-                        patches.extend(end_patches)
+                    maybe_end_turn(state, user_id, events, patches)
                 elif action_type == ActionType.END_TURN:
                     events, patches = process_end_turn(state, user_id)
                     apply_patches(state, patches)
@@ -345,7 +347,8 @@ def register_game_handlers(
                 state["revision"] += 1
                 await save_game_state(game_id, state)
                 await sync_runtime.set_active_game(
-                    user_id=user_id, game_id=str(game_id)
+                    user_id=user_id,
+                    game_id=str(game_id),
                 )
 
         except LockAcquisitionError:
@@ -438,21 +441,13 @@ def register_game_handlers(
             )
             return
 
-        client_revision = None
-        if "knownRevision" in data:
-            try:
-                client_revision = int(data.get("knownRevision"))
-            except (TypeError, ValueError):
-                await sio.emit(
-                    "game:error",
-                    {
-                        "gameId": game_id,
-                        "code": "DESYNC",
-                        "message": "knownRevision 값이 올바르지 않습니다.",
-                    },
-                    to=sid,
-                )
-                return
+        client_revision = await parse_known_revision(
+            sid=sid,
+            data=data,
+            game_id=game_id,
+        )
+        if "knownRevision" in data and client_revision is None:
+            return
 
         try:
             async with game_lock(game_id):
@@ -477,14 +472,10 @@ def register_game_handlers(
                     client_revision is not None
                     and int(state.get("revision", -1)) != client_revision
                 ):
-                    await sio.emit(
-                        "game:error",
-                        {
-                            "gameId": game_id,
-                            "code": "DESYNC",
-                            "message": "클라이언트 상태가 오래됐습니다.",
-                        },
-                        to=sid,
+                    await emit_desync_error(
+                        sid=sid,
+                        game_id=game_id,
+                        message="클라이언트 상태가 오래됐습니다.",
                     )
                     return
 
@@ -496,17 +487,13 @@ def register_game_handlers(
                     payload=payload,
                 )
                 apply_patches(state, patches)
-
-                if state["status"] == "playing" and state.get("pending_prompt") is None:
-                    end_events, end_patches = process_end_turn(state, user_id)
-                    apply_patches(state, end_patches)
-                    events.extend(end_events)
-                    patches.extend(end_patches)
+                maybe_end_turn(state, user_id, events, patches)
 
                 state["revision"] += 1
                 await save_game_state(game_id, state)
                 await sync_runtime.set_active_game(
-                    user_id=user_id, game_id=str(game_id)
+                    user_id=user_id,
+                    game_id=str(game_id),
                 )
 
         except LockAcquisitionError:
