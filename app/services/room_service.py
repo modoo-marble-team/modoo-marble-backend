@@ -122,7 +122,9 @@ class RoomService:
     def _all_ready(self, room: dict) -> bool:
         if len(room["players"]) < 2:
             return False
-        return all(player["is_host"] or player["is_ready"] for player in room["players"])
+        return all(
+            player["is_host"] or player["is_ready"] for player in room["players"]
+        )
 
     async def list_rooms(
         self,
@@ -344,7 +346,9 @@ class RoomService:
 
         game = await Game.create(round_count=0)
         player_ids = [int(player["id"]) for player in room["players"]]
-        nicknames = {int(player["id"]): player["nickname"] for player in room["players"]}
+        nicknames = {
+            int(player["id"]): player["nickname"] for player in room["players"]
+        }
 
         for player_id in player_ids:
             await UserGame.create(game_id=int(game.id), user_id=player_id)

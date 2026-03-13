@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 
@@ -45,7 +45,6 @@ def _prop(tile_id: int, name: str, tier: int) -> TileDefinition:
     )
 
 
-
 def _special(tile_id: int, name: str, tile_type: TileType) -> TileDefinition:
     return TileDefinition(tile_id=tile_id, name=name, tile_type=tile_type)
 
@@ -90,4 +89,3 @@ BOARD_SIZE = len(BOARD)
 ISLAND_TILE_ID = 8
 START_TILE_ID = 0
 START_SALARY = 200
-

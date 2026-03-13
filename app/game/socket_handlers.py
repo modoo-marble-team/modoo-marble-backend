@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import socketio
 
@@ -69,16 +69,28 @@ def register_game_handlers(
         room_id = str(data.get("room_id") or "")
 
         if user_id is None:
-            await sio.emit("game:error", {"code": "AUTH_REQUIRED", "message": "Authentication required."}, to=sid)
+            await sio.emit(
+                "game:error",
+                {"code": "AUTH_REQUIRED", "message": "Authentication required."},
+                to=sid,
+            )
             return
 
         room = await room_service.get_room(room_id)
         if room is None:
-            await sio.emit("game:error", {"code": "ROOM_NOT_FOUND", "message": "Room not found."}, to=sid)
+            await sio.emit(
+                "game:error",
+                {"code": "ROOM_NOT_FOUND", "message": "Room not found."},
+                to=sid,
+            )
             return
 
         if not any(player["id"] == str(user_id) for player in room["players"]):
-            await sio.emit("game:error", {"code": "NOT_ROOM_MEMBER", "message": "You are not in this room."}, to=sid)
+            await sio.emit(
+                "game:error",
+                {"code": "NOT_ROOM_MEMBER", "message": "You are not in this room."},
+                to=sid,
+            )
             return
 
         await sio.enter_room(sid, f"room:{room_id}")
@@ -96,7 +108,11 @@ def register_game_handlers(
         message = str(data.get("message") or "").strip()
 
         if user_id is None:
-            await sio.emit("game:error", {"code": "AUTH_REQUIRED", "message": "Authentication required."}, to=sid)
+            await sio.emit(
+                "game:error",
+                {"code": "AUTH_REQUIRED", "message": "Authentication required."},
+                to=sid,
+            )
             return
 
         if not room_id or not message:
@@ -107,7 +123,9 @@ def register_game_handlers(
             user_id=user_id,
             message=message,
         )
-        await sio.emit("chat", {"room_id": room_id, **chat_message}, room=f"room:{room_id}")
+        await sio.emit(
+            "chat", {"room_id": room_id, **chat_message}, room=f"room:{room_id}"
+        )
 
     @sio.on("game:sync")
     async def game_sync(sid: str, data: dict) -> None:
@@ -160,7 +178,11 @@ def register_game_handlers(
     async def handle_game_action(sid: str, data: dict) -> None:
         user_id = sid_to_user.get(sid)
         if user_id is None:
-            await sio.emit("game:error", {"code": "AUTH_REQUIRED", "message": "Authentication required."}, to=sid)
+            await sio.emit(
+                "game:error",
+                {"code": "AUTH_REQUIRED", "message": "Authentication required."},
+                to=sid,
+            )
             return
 
         game_id = data.get("gameId")
@@ -204,12 +226,19 @@ def register_game_handlers(
                 if action_type == ActionType.ROLL_DICE:
                     events, patches = process_roll_dice(state, user_id)
                     apply_patches(state, patches)
-                    if state.get("pending_prompt") is None and state["status"] == "playing":
+                    if (
+                        state.get("pending_prompt") is None
+                        and state["status"] == "playing"
+                    ):
                         end_events, end_patches = process_end_turn(state, user_id)
                         apply_patches(state, end_patches)
                         events.extend(end_events)
                 elif action_type == ActionType.BUY_PROPERTY:
-                    payload = data.get("payload") if isinstance(data.get("payload"), dict) else {}
+                    payload = (
+                        data.get("payload")
+                        if isinstance(data.get("payload"), dict)
+                        else {}
+                    )
                     tile_id = int(payload.get("tileId", -1))
                     events, patches = process_buy_property_action(
                         state,
@@ -217,17 +246,25 @@ def register_game_handlers(
                         tile_id=tile_id,
                     )
                     apply_patches(state, patches)
-                    if state.get("pending_prompt") is None and state["status"] == "playing":
+                    if (
+                        state.get("pending_prompt") is None
+                        and state["status"] == "playing"
+                    ):
                         end_events, end_patches = process_end_turn(state, user_id)
                         apply_patches(state, end_patches)
                         events.extend(end_events)
                 elif action_type == ActionType.SELL_PROPERTY:
-                    payload = data.get("payload") if isinstance(data.get("payload"), dict) else {}
+                    payload = (
+                        data.get("payload")
+                        if isinstance(data.get("payload"), dict)
+                        else {}
+                    )
                     tile_id = int(payload.get("tileId", -1))
                     raw_building_level = payload.get("buildingLevel")
                     building_level = (
                         int(raw_building_level)
-                        if isinstance(raw_building_level, (int, str)) and str(raw_building_level).strip() != ""
+                        if isinstance(raw_building_level, (int, str))
+                        and str(raw_building_level).strip() != ""
                         else None
                     )
                     events, patches = process_sell_property_action(
@@ -237,7 +274,10 @@ def register_game_handlers(
                         building_level=building_level,
                     )
                     apply_patches(state, patches)
-                    if state.get("pending_prompt") is None and state["status"] == "playing":
+                    if (
+                        state.get("pending_prompt") is None
+                        and state["status"] == "playing"
+                    ):
                         end_events, end_patches = process_end_turn(state, user_id)
                         apply_patches(state, end_patches)
                         events.extend(end_events)
@@ -317,7 +357,11 @@ def register_game_handlers(
     async def handle_prompt_response(sid: str, data: dict) -> None:
         user_id = sid_to_user.get(sid)
         if user_id is None:
-            await sio.emit("game:error", {"code": "AUTH_REQUIRED", "message": "Authentication required."}, to=sid)
+            await sio.emit(
+                "game:error",
+                {"code": "AUTH_REQUIRED", "message": "Authentication required."},
+                to=sid,
+            )
             return
 
         game_id = data.get("gameId")
@@ -432,4 +476,3 @@ def register_game_handlers(
             room=f"game:{game_id}",
         )
         await emit_prompt_if_needed(state)
-

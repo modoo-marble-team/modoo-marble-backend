@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from enum import StrEnum
 
@@ -46,4 +46,3 @@ class PatchOp(StrEnum):
     INC = "inc"
     PUSH = "push"
     REMOVE = "remove"
-
