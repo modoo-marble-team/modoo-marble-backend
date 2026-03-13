@@ -10,9 +10,9 @@ from app.game.timer import TURN_TIMEOUT_SECONDS
 
 PLAYER_COLORS = ["#EF5350", "#42A5F5", "#66BB6A", "#FFD15B"]
 PLAYER_STATE_MAP = {
-    PlayerState.NORMAL: "normal",
-    PlayerState.LOCKED: "locked",
-    PlayerState.BANKRUPT: "bankrupt",
+    PlayerState.NORMAL.value: "normal",
+    PlayerState.LOCKED.value: "locked",
+    PlayerState.BANKRUPT.value: "bankrupt",
 }
 
 NETWORK_KEY_MAP = {
@@ -31,6 +31,7 @@ NETWORK_KEY_MAP = {
     "known_revision": "knownRevision",
     "current_revision": "currentRevision",
     "winner_player_id": "winnerPlayerId",
+    "state": "playerState",
 }
 
 PATCH_PATH_MAP = {
@@ -62,8 +63,6 @@ def _normalize_payload(value: Any) -> Any:
         normalized: dict[str, Any] = {}
         for key, item in value.items():
             out_key = _normalize_key(str(key))
-            if key == "state":
-                out_key = "playerState"
             normalized[out_key] = _normalize_payload(item)
         return normalized
 
