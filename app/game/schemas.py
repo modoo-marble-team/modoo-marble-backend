@@ -56,6 +56,7 @@ class GameState(TypedDict):
     players: dict[str, PlayerGameState]
     tiles: dict[str, TileGameState]
     pending_prompt: PendingPrompt | None
+    winnerId: int | None  # 게임 종료 시 승자 플레이어 ID
 
 
 class ServerPatchOperation(TypedDict):

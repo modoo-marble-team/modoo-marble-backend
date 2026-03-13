@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import copy
 import random
-from copy import deepcopy
 
 from app.game.board import BOARD_SIZE, ISLAND_TILE_ID, START_SALARY, TILE_MAP
 from app.game.enums import PlayerState, ServerEventType
@@ -119,7 +119,11 @@ def process_roll_dice(
             from_tile = player["currentTileId"]
             to_tile = (from_tile + total) % BOARD_SIZE
             _add_movement(player_id, from_tile, to_tile, events, patches)
-            preview_state = deepcopy(state)
+            preview_state = {
+                **state,
+                "players": copy.deepcopy(state["players"]),
+                "tiles": copy.deepcopy(state["tiles"]),
+            }
             apply_patches(preview_state, patches)
             landing_events, landing_patches = resolve_landing(
                 preview_state, player_id, to_tile
@@ -226,7 +230,11 @@ def process_roll_dice(
         )
 
     _add_movement(player_id, from_tile, to_tile, events, patches)
-    preview_state = deepcopy(state)
+    preview_state = {
+        **state,
+        "players": copy.deepcopy(state["players"]),
+        "tiles": copy.deepcopy(state["tiles"]),
+    }
     apply_patches(preview_state, patches)
     landing_events, landing_patches = resolve_landing(preview_state, player_id, to_tile)
     events.extend(landing_events)

@@ -78,6 +78,7 @@ def process_end_turn(
             {"op": "set", "path": "status", "value": "finished"},
             {"op": "set", "path": "phase", "value": PHASE_GAME_OVER},
             {"op": "set", "path": "pending_prompt", "value": None},
+            {"op": "set", "path": "winnerId", "value": winner["playerId"]},
         ]
 
     next_player_id = get_next_player_id(state, player_id)
@@ -109,9 +110,10 @@ def process_end_turn(
 
     # ── 20라운드 종료 조건 ───────────────────────────────
     if new_round > MAX_ROUNDS:
+        winner = _find_winner(state)
         patches.append({"op": "set", "path": "status", "value": "finished"})
         patches.append({"op": "set", "path": "phase", "value": PHASE_GAME_OVER})
-        winner = _find_winner(state)
+        patches.append({"op": "set", "path": "winnerId", "value": winner["playerId"]})
         events.append(
             {
                 "type": ServerEventType.GAME_OVER,

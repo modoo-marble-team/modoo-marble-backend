@@ -90,6 +90,7 @@ async def init_game_state(
         players=_make_initial_players(player_ids, nicknames),
         tiles=_make_initial_tiles(),
         pending_prompt=None,
+        winnerId=None,
     )
     redis = get_redis()
     await redis.set(_game_key(game_id), json.dumps(state), ex=GAME_STATE_TTL)

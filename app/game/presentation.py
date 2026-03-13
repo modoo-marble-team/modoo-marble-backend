@@ -44,7 +44,6 @@ def serialize_game_snapshot(state: GameState) -> dict:
         serialized_players.append(
             {
                 "playerId": str(player["playerId"]),
-                "name": player["nickname"],
                 "nickname": player["nickname"],
                 "currentTileId": player["currentTileId"],
                 "balance": player["balance"],
@@ -70,7 +69,9 @@ def serialize_game_snapshot(state: GameState) -> dict:
         "turnTimeoutSec": TURN_TIMEOUT_SECONDS,
         "prompt": serialize_prompt(state.get("pending_prompt")),
         "isGameOver": state["status"] != "playing",
-        "winnerId": None,
+        "winnerId": str(state["winnerId"])
+        if state.get("winnerId") is not None
+        else None,
     }
 
 
@@ -78,6 +79,7 @@ def serialize_game_patch(
     state: GameState,
     *,
     events: list[dict],
+    patches: list[dict] | None = None,
     include_snapshot: bool = True,
 ) -> dict:
     return {
@@ -85,6 +87,6 @@ def serialize_game_patch(
         "revision": state["revision"],
         "turn": state["turn"],  # 숫자 그대로 유지
         "events": events,
-        "patch": [],
+        "patch": patches or [],
         "snapshot": serialize_game_snapshot(state) if include_snapshot else None,
     }
