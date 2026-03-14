@@ -10,11 +10,14 @@ from starlette.middleware.cors import CORSMiddleware
 from tortoise import Tortoise
 
 from app.config import TORTOISE_ORM, settings
+from app.dm.socket_handlers import register_dm_handlers
 from app.errors import register_error_handlers
+from app.game.reconnect import mark_disconnected
 from app.game.socket_handlers import register_game_handlers
+from app.lobby.socket_handlers import register_lobby_handlers
 from app.models.user import User
 from app.presence import list_online, set_offline, set_online
-from app.redis_client import close_redis, init_redis
+from app.redis_client import close_redis, get_redis, init_redis
 from app.routers import auth, game, lobby, users
 from app.utils.jwt import decode_token
 
@@ -31,6 +34,8 @@ sio = socketio.AsyncServer(
 )
 _sid_to_user: dict[str, int] = {}
 register_game_handlers(sio, _sid_to_user)
+register_lobby_handlers(sio, _sid_to_user)
+register_dm_handlers(sio, _sid_to_user)
 
 
 async def _broadcast_user_status(user_id: int, nickname: str, status: str) -> None:
@@ -79,8 +84,25 @@ async def disconnect(sid: str):
     try:
         user_id = _sid_to_user.pop(sid, None)
         if user_id is not None:
+            await _handle_game_disconnect(user_id)
             await set_offline(user_id=str(user_id))
             await _broadcast_user_status(int(user_id), "", "offline")
+    except Exception:
+        pass
+
+
+async def _handle_game_disconnect(user_id: int) -> None:
+    try:
+        redis = get_redis()
+        game_id = await redis.get(f"user:{user_id}:game")
+        if game_id is None:
+            return
+        await mark_disconnected(
+            game_id=game_id,
+            user_id=user_id,
+            sio=sio,
+            sid_to_user=_sid_to_user,
+        )
     except Exception:
         pass
 

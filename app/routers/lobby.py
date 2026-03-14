@@ -49,7 +49,7 @@ async def get_rooms(
         exclude_private=exclude_private,
         keyword=keyword,
     )
-    return {"rooms": rooms}
+    return {"rooms": rooms, "total": len(rooms)}
 
 
 @router.post("/rooms", response_model=dict)

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import copy
+import random
 from uuid import uuid4
 
-from app.game.board import BOARD_SIZE, ISLAND_TILE_ID, TILE_MAP, TileType
+from app.game.board import BOARD_SIZE, ISLAND_TILE_ID, START_SALARY, TILE_MAP, TileType
 from app.game.enums import PlayerState, ServerEventType
 from app.game.errors import GameActionError
 from app.game.schemas import GameState, PendingPrompt, PromptChoice
@@ -36,6 +37,39 @@ CHANCE_EFFECTS: dict[int, tuple[str, int]] = {
 }
 
 EVENT_EFFECT_AMOUNT = 200
+
+CHANCE_CARD_POOL: list[dict] = [
+    {
+        "type": "GAIN_MONEY",
+        "amount": 300,
+        "description": "복권에 당첨되었습니다! 300만원 획득!",
+    },
+    {"type": "GAIN_MONEY", "amount": 200, "description": "세금 환급! 200만원 획득!"},
+    {"type": "GAIN_MONEY", "amount": 500, "description": "보너스 지급! 500만원 획득!"},
+    {"type": "LOSE_MONEY", "amount": 150, "description": "교통 벌금! 150만원 납부!"},
+    {"type": "LOSE_MONEY", "amount": 200, "description": "병원비 지출! 200만원 납부!"},
+    {"type": "LOSE_MONEY", "amount": 300, "description": "세금 납부! 300만원 납부!"},
+    {"type": "MOVE_FORWARD", "amount": 3, "description": "앞으로 3칸 전진!"},
+    {"type": "MOVE_FORWARD", "amount": 5, "description": "앞으로 5칸 전진!"},
+    {"type": "MOVE_BACKWARD", "amount": 2, "description": "뒤로 2칸 후퇴!"},
+    {"type": "MOVE_BACKWARD", "amount": 3, "description": "뒤로 3칸 후퇴!"},
+    {
+        "type": "STEAL_PROPERTY",
+        "amount": 0,
+        "description": "상대방의 땅을 하나 빼앗습니다!",
+    },
+    {
+        "type": "GIVE_PROPERTY",
+        "amount": 0,
+        "description": "소유한 땅 하나를 빼앗겼습니다!",
+    },
+]
+
+EVENT_CARD_POOL: list[dict] = [
+    {"type": "GAIN_MONEY", "amount": 200, "description": "축하금 200만원 수령!"},
+    {"type": "GAIN_MONEY", "amount": 100, "description": "용돈 100만원 수령!"},
+    {"type": "LOSE_MONEY", "amount": 100, "description": "기부금 100만원 납부!"},
+]
 
 
 def serialize_prompt(prompt: PendingPrompt | None) -> dict | None:
@@ -184,6 +218,199 @@ def _get_sell_refund(tile_id: int, building_level: int) -> int:
             refund += base_price * SELL_REFUND_MULTIPLIER_TIER_6
 
     return refund
+
+
+def _apply_chance_card(
+    state: GameState, player_id: int, card: dict
+) -> tuple[list[dict], list[dict]]:
+    chance_type = card["type"]
+    amount = card.get("amount", 0)
+    events: list[dict] = []
+    patches: list[dict] = []
+
+    if chance_type == "GAIN_MONEY":
+        money_patches, money_events = _apply_money_delta(
+            state, player_id=player_id, amount=amount
+        )
+        patches.extend(money_patches)
+        events.extend(money_events)
+
+    elif chance_type == "LOSE_MONEY":
+        money_patches, money_events = _apply_money_delta(
+            state, player_id=player_id, amount=-amount
+        )
+        patches.extend(money_patches)
+        events.extend(money_events)
+
+    elif chance_type == "MOVE_FORWARD":
+        player = state["players"][str(player_id)]
+        from_tile = player["currentTileId"]
+        to_tile = (from_tile + amount) % BOARD_SIZE
+        passed_start = from_tile + amount >= BOARD_SIZE
+        patches.append(
+            {
+                "op": "set",
+                "path": f"players.{player_id}.currentTileId",
+                "value": to_tile,
+            }
+        )
+        events.append(
+            {
+                "type": ServerEventType.PLAYER_MOVED,
+                "playerId": player_id,
+                "fromTileId": from_tile,
+                "toTileId": to_tile,
+                "trigger": "chance",
+                "passGo": passed_start,
+            }
+        )
+        if passed_start:
+            patches.append(
+                {
+                    "op": "inc",
+                    "path": f"players.{player_id}.balance",
+                    "value": START_SALARY,
+                }
+            )
+
+    elif chance_type == "MOVE_BACKWARD":
+        player = state["players"][str(player_id)]
+        from_tile = player["currentTileId"]
+        to_tile = (from_tile - amount) % BOARD_SIZE
+        patches.append(
+            {
+                "op": "set",
+                "path": f"players.{player_id}.currentTileId",
+                "value": to_tile,
+            }
+        )
+        events.append(
+            {
+                "type": ServerEventType.PLAYER_MOVED,
+                "playerId": player_id,
+                "fromTileId": from_tile,
+                "toTileId": to_tile,
+                "trigger": "chance",
+                "passGo": False,
+            }
+        )
+
+    elif chance_type == "STEAL_PROPERTY":
+        other_players = [
+            (pid, p)
+            for pid, p in state["players"].items()
+            if int(pid) != player_id
+            and p["playerState"] != PlayerState.BANKRUPT
+            and p["ownedTiles"]
+        ]
+        if other_players:
+            target_pid, target_player = random.choice(other_players)
+            stolen_tile_id = random.choice(target_player["ownedTiles"])
+            target_id = int(target_pid)
+            patches.extend(
+                [
+                    {
+                        "op": "set",
+                        "path": f"tiles.{stolen_tile_id}.ownerId",
+                        "value": player_id,
+                    },
+                    {
+                        "op": "set",
+                        "path": f"tiles.{stolen_tile_id}.buildingLevel",
+                        "value": 0,
+                    },
+                    {
+                        "op": "remove",
+                        "path": f"players.{target_id}.ownedTiles",
+                        "value": stolen_tile_id,
+                    },
+                    {
+                        "op": "remove",
+                        "path": f"players.{target_id}.buildingLevels",
+                        "value": str(stolen_tile_id),
+                    },
+                    {
+                        "op": "push",
+                        "path": f"players.{player_id}.ownedTiles",
+                        "value": stolen_tile_id,
+                    },
+                    {
+                        "op": "set",
+                        "path": f"players.{player_id}.buildingLevels.{stolen_tile_id}",
+                        "value": 0,
+                    },
+                ]
+            )
+            events.append(
+                {
+                    "type": ServerEventType.CHANCE_RESOLVED,
+                    "playerId": player_id,
+                    "chance": {
+                        "type": "STEAL_PROPERTY",
+                        "fromPlayerId": target_id,
+                        "tileId": stolen_tile_id,
+                    },
+                }
+            )
+
+    elif chance_type == "GIVE_PROPERTY":
+        player = state["players"][str(player_id)]
+        if player["ownedTiles"]:
+            other_alive = [
+                pid
+                for pid, p in state["players"].items()
+                if int(pid) != player_id and p["playerState"] != PlayerState.BANKRUPT
+            ]
+            if other_alive:
+                given_tile_id = random.choice(player["ownedTiles"])
+                receiver_id = int(random.choice(other_alive))
+                patches.extend(
+                    [
+                        {
+                            "op": "set",
+                            "path": f"tiles.{given_tile_id}.ownerId",
+                            "value": receiver_id,
+                        },
+                        {
+                            "op": "set",
+                            "path": f"tiles.{given_tile_id}.buildingLevel",
+                            "value": 0,
+                        },
+                        {
+                            "op": "remove",
+                            "path": f"players.{player_id}.ownedTiles",
+                            "value": given_tile_id,
+                        },
+                        {
+                            "op": "remove",
+                            "path": f"players.{player_id}.buildingLevels",
+                            "value": str(given_tile_id),
+                        },
+                        {
+                            "op": "push",
+                            "path": f"players.{receiver_id}.ownedTiles",
+                            "value": given_tile_id,
+                        },
+                        {
+                            "op": "set",
+                            "path": f"players.{receiver_id}.buildingLevels.{given_tile_id}",
+                            "value": 0,
+                        },
+                    ]
+                )
+                events.append(
+                    {
+                        "type": ServerEventType.CHANCE_RESOLVED,
+                        "playerId": player_id,
+                        "chance": {
+                            "type": "GIVE_PROPERTY",
+                            "toPlayerId": receiver_id,
+                            "tileId": given_tile_id,
+                        },
+                    }
+                )
+
+    return events, patches
 
 
 def _append_landed_event(events: list[dict], *, player_id: int, tile_id: int) -> None:
@@ -609,47 +836,44 @@ def resolve_landing(
         return events, patches
 
     if tile_def.tile_type == TileType.EVENT:
-        money_patches, money_events = _apply_money_delta(
-            state,
-            player_id=player_id,
-            amount=EVENT_EFFECT_AMOUNT,
-        )
-        patches.extend(money_patches)
-        events.extend(money_events)
+        card = random.choice(EVENT_CARD_POOL)
+        card_events, card_patches = _apply_chance_card(state, player_id, card)
+        patches.extend(card_patches)
+        events.extend(card_events)
         events.append(
             {
                 "type": ServerEventType.CHANCE_RESOLVED,
                 "playerId": player_id,
                 "tileId": tile_id,
                 "chance": {
-                    "type": "EVENT_BONUS",
-                    "power": EVENT_EFFECT_AMOUNT,
+                    "type": card["type"],
+                    "power": card.get("amount", 0),
+                    "description": card["description"],
                 },
             }
         )
         return events, patches
 
     if tile_def.tile_type == TileType.CHANCE:
-        chance_type, amount = CHANCE_EFFECTS.get(tile_id, ("GAIN_MONEY", 200))
-        delta = amount if chance_type == "GAIN_MONEY" else -amount
-        money_patches, money_events = _apply_money_delta(
-            state,
-            player_id=player_id,
-            amount=delta,
-        )
-        patches.extend(money_patches)
-        events.extend(money_events)
-        events.append(
-            {
-                "type": ServerEventType.CHANCE_RESOLVED,
-                "playerId": player_id,
-                "tileId": tile_id,
-                "chance": {
-                    "type": chance_type,
-                    "power": amount,
-                },
-            }
-        )
+        card = random.choice(CHANCE_CARD_POOL)
+        card_events, card_patches = _apply_chance_card(state, player_id, card)
+        patches.extend(card_patches)
+        events.extend(card_events)
+        if not any(
+            e.get("type") == ServerEventType.CHANCE_RESOLVED for e in card_events
+        ):
+            events.append(
+                {
+                    "type": ServerEventType.CHANCE_RESOLVED,
+                    "playerId": player_id,
+                    "tileId": tile_id,
+                    "chance": {
+                        "type": card["type"],
+                        "power": card.get("amount", 0),
+                        "description": card["description"],
+                    },
+                }
+            )
         return events, patches
 
     if tile_def.tile_type == TileType.AI:

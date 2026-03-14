@@ -30,6 +30,7 @@ async def _auto_end_turn(game_id: str, sio: socketio.AsyncServer) -> None:
                 return
 
             player_id = state["current_player_id"]
+            all_patches: list[dict] = []
             if state.get("pending_prompt") is not None:
                 prompt = state["pending_prompt"]
                 events, patches = process_prompt_response(
@@ -39,19 +40,22 @@ async def _auto_end_turn(game_id: str, sio: socketio.AsyncServer) -> None:
                     choice=default_prompt_choice(prompt),
                 )
                 apply_patches(state, patches)
+                all_patches.extend(patches)
                 end_events, end_patches = process_end_turn(state, player_id)
                 apply_patches(state, end_patches)
                 events.extend(end_events)
+                all_patches.extend(end_patches)
             else:
                 events, patches = process_end_turn(state, player_id)
                 apply_patches(state, patches)
+                all_patches.extend(patches)
 
             state["revision"] += 1
             await save_game_state(game_id, state)
 
         await sio.emit(
             "game:patch",
-            serialize_game_patch(state, events=events),
+            serialize_game_patch(state, events=events, patches=all_patches),
             room=f"game:{game_id}",
         )
 
