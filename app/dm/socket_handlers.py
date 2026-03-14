@@ -68,7 +68,10 @@ def register_dm_handlers(
         if receiver_id == sender_id:
             await sio.emit(
                 "game:error",
-                {"code": "DM_TARGET_NOT_FOUND", "message": "자기 자신에게 DM을 보낼 수 없습니다."},
+                {
+                    "code": "DM_TARGET_NOT_FOUND",
+                    "message": "자기 자신에게 DM을 보낼 수 없습니다.",
+                },
                 to=sid,
             )
             return
@@ -78,7 +81,10 @@ def register_dm_handlers(
         if now - last_sent < DM_RATE_LIMIT_SECONDS:
             await sio.emit(
                 "game:error",
-                {"code": "DM_RATE_LIMITED", "message": "메시지를 너무 빠르게 보내고 있습니다."},
+                {
+                    "code": "DM_RATE_LIMITED",
+                    "message": "메시지를 너무 빠르게 보내고 있습니다.",
+                },
                 to=sid,
             )
             return
@@ -87,7 +93,10 @@ def register_dm_handlers(
         if receiver_status is None:
             await sio.emit(
                 "game:error",
-                {"code": "DM_TARGET_OFFLINE", "message": "상대방이 오프라인 상태입니다."},
+                {
+                    "code": "DM_TARGET_OFFLINE",
+                    "message": "상대방이 오프라인 상태입니다.",
+                },
                 to=sid,
             )
             return

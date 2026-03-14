@@ -7,6 +7,7 @@ from app.game.actions.roll_dice import process_roll_dice
 from app.game.enums import ActionType, ServerEventType
 from app.game.errors import GameActionError
 from app.game.presentation import serialize_game_patch
+from app.game.reconnect import mark_reconnected
 from app.game.rules import (
     process_buy_property_action,
     process_prompt_response,
@@ -20,7 +21,6 @@ from app.game.state import (
     get_game_state,
     save_game_state,
 )
-from app.game.reconnect import mark_reconnected
 from app.game.timer import start_turn_timer
 
 PROMPT_RESPONSE_ACK_TYPE = "PROMPT_RESPONSE"
@@ -30,7 +30,6 @@ def register_game_handlers(
     sio: socketio.AsyncServer,
     sid_to_user: dict[str, int],
 ) -> None:
-
     async def emit_prompt_if_needed(state: dict) -> None:
         prompt_payload = serialize_prompt(state.get("pending_prompt"))
         if not prompt_payload:
@@ -97,9 +96,7 @@ def register_game_handlers(
         # 재연결 시 30초 자동파산 타이머 취소
         user_id = sid_to_user.get(sid)
         if user_id is not None:
-            was_disconnected = await mark_reconnected(
-                game_id=game_id, user_id=user_id
-            )
+            was_disconnected = await mark_reconnected(game_id=game_id, user_id=user_id)
             if was_disconnected:
                 reconnect_event = {
                     "type": ServerEventType.PLAYER_RECONNECTED,

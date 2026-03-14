@@ -92,11 +92,16 @@ async def _auto_bankrupt_after_timeout(
         return
 
     try:
-        from app.game.state import game_lock, get_game_state, save_game_state, apply_patches
-        from app.game.rules import _bankrupt_player_patches, _bankrupt_player_events
+        from app.game.actions.end_turn import process_end_turn
         from app.game.enums import PlayerState, ServerEventType
         from app.game.presentation import serialize_game_patch
-        from app.game.actions.end_turn import process_end_turn
+        from app.game.rules import _bankrupt_player_events, _bankrupt_player_patches
+        from app.game.state import (
+            apply_patches,
+            game_lock,
+            get_game_state,
+            save_game_state,
+        )
 
         async with game_lock(game_id):
             state = await get_game_state(game_id)
@@ -115,7 +120,8 @@ async def _auto_bankrupt_after_timeout(
             state["revision"] += 1
 
             alive_players = [
-                p for p in state["players"].values()
+                p
+                for p in state["players"].values()
                 if p["playerState"] != PlayerState.BANKRUPT
             ]
             if len(alive_players) <= 1:
@@ -140,7 +146,7 @@ async def _auto_bankrupt_after_timeout(
 
             await save_game_state(game_id, state)
 
-            patch_payload = serialize_game_patch(state, events, patches)
+            patch_payload = serialize_game_patch(state, events=events, patches=patches)
             await sio.emit("game:patch", patch_payload, room=f"game:{game_id}")
 
         logger.info(

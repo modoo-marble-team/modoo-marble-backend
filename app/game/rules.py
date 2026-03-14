@@ -39,7 +39,11 @@ CHANCE_EFFECTS: dict[int, tuple[str, int]] = {
 EVENT_EFFECT_AMOUNT = 200
 
 CHANCE_CARD_POOL: list[dict] = [
-    {"type": "GAIN_MONEY", "amount": 300, "description": "복권에 당첨되었습니다! 300만원 획득!"},
+    {
+        "type": "GAIN_MONEY",
+        "amount": 300,
+        "description": "복권에 당첨되었습니다! 300만원 획득!",
+    },
     {"type": "GAIN_MONEY", "amount": 200, "description": "세금 환급! 200만원 획득!"},
     {"type": "GAIN_MONEY", "amount": 500, "description": "보너스 지급! 500만원 획득!"},
     {"type": "LOSE_MONEY", "amount": 150, "description": "교통 벌금! 150만원 납부!"},
@@ -49,8 +53,16 @@ CHANCE_CARD_POOL: list[dict] = [
     {"type": "MOVE_FORWARD", "amount": 5, "description": "앞으로 5칸 전진!"},
     {"type": "MOVE_BACKWARD", "amount": 2, "description": "뒤로 2칸 후퇴!"},
     {"type": "MOVE_BACKWARD", "amount": 3, "description": "뒤로 3칸 후퇴!"},
-    {"type": "STEAL_PROPERTY", "amount": 0, "description": "상대방의 땅을 하나 빼앗습니다!"},
-    {"type": "GIVE_PROPERTY", "amount": 0, "description": "소유한 땅 하나를 빼앗겼습니다!"},
+    {
+        "type": "STEAL_PROPERTY",
+        "amount": 0,
+        "description": "상대방의 땅을 하나 빼앗습니다!",
+    },
+    {
+        "type": "GIVE_PROPERTY",
+        "amount": 0,
+        "description": "소유한 땅 하나를 빼앗겼습니다!",
+    },
 ]
 
 EVENT_CARD_POOL: list[dict] = [
@@ -236,7 +248,11 @@ def _apply_chance_card(
         to_tile = (from_tile + amount) % BOARD_SIZE
         passed_start = from_tile + amount >= BOARD_SIZE
         patches.append(
-            {"op": "set", "path": f"players.{player_id}.currentTileId", "value": to_tile}
+            {
+                "op": "set",
+                "path": f"players.{player_id}.currentTileId",
+                "value": to_tile,
+            }
         )
         events.append(
             {
@@ -250,7 +266,11 @@ def _apply_chance_card(
         )
         if passed_start:
             patches.append(
-                {"op": "inc", "path": f"players.{player_id}.balance", "value": START_SALARY}
+                {
+                    "op": "inc",
+                    "path": f"players.{player_id}.balance",
+                    "value": START_SALARY,
+                }
             )
 
     elif chance_type == "MOVE_BACKWARD":
@@ -258,7 +278,11 @@ def _apply_chance_card(
         from_tile = player["currentTileId"]
         to_tile = (from_tile - amount) % BOARD_SIZE
         patches.append(
-            {"op": "set", "path": f"players.{player_id}.currentTileId", "value": to_tile}
+            {
+                "op": "set",
+                "path": f"players.{player_id}.currentTileId",
+                "value": to_tile,
+            }
         )
         events.append(
             {
@@ -285,12 +309,36 @@ def _apply_chance_card(
             target_id = int(target_pid)
             patches.extend(
                 [
-                    {"op": "set", "path": f"tiles.{stolen_tile_id}.ownerId", "value": player_id},
-                    {"op": "set", "path": f"tiles.{stolen_tile_id}.buildingLevel", "value": 0},
-                    {"op": "remove", "path": f"players.{target_id}.ownedTiles", "value": stolen_tile_id},
-                    {"op": "remove", "path": f"players.{target_id}.buildingLevels", "value": str(stolen_tile_id)},
-                    {"op": "push", "path": f"players.{player_id}.ownedTiles", "value": stolen_tile_id},
-                    {"op": "set", "path": f"players.{player_id}.buildingLevels.{stolen_tile_id}", "value": 0},
+                    {
+                        "op": "set",
+                        "path": f"tiles.{stolen_tile_id}.ownerId",
+                        "value": player_id,
+                    },
+                    {
+                        "op": "set",
+                        "path": f"tiles.{stolen_tile_id}.buildingLevel",
+                        "value": 0,
+                    },
+                    {
+                        "op": "remove",
+                        "path": f"players.{target_id}.ownedTiles",
+                        "value": stolen_tile_id,
+                    },
+                    {
+                        "op": "remove",
+                        "path": f"players.{target_id}.buildingLevels",
+                        "value": str(stolen_tile_id),
+                    },
+                    {
+                        "op": "push",
+                        "path": f"players.{player_id}.ownedTiles",
+                        "value": stolen_tile_id,
+                    },
+                    {
+                        "op": "set",
+                        "path": f"players.{player_id}.buildingLevels.{stolen_tile_id}",
+                        "value": 0,
+                    },
                 ]
             )
             events.append(
@@ -311,20 +359,43 @@ def _apply_chance_card(
             other_alive = [
                 pid
                 for pid, p in state["players"].items()
-                if int(pid) != player_id
-                and p["playerState"] != PlayerState.BANKRUPT
+                if int(pid) != player_id and p["playerState"] != PlayerState.BANKRUPT
             ]
             if other_alive:
                 given_tile_id = random.choice(player["ownedTiles"])
                 receiver_id = int(random.choice(other_alive))
                 patches.extend(
                     [
-                        {"op": "set", "path": f"tiles.{given_tile_id}.ownerId", "value": receiver_id},
-                        {"op": "set", "path": f"tiles.{given_tile_id}.buildingLevel", "value": 0},
-                        {"op": "remove", "path": f"players.{player_id}.ownedTiles", "value": given_tile_id},
-                        {"op": "remove", "path": f"players.{player_id}.buildingLevels", "value": str(given_tile_id)},
-                        {"op": "push", "path": f"players.{receiver_id}.ownedTiles", "value": given_tile_id},
-                        {"op": "set", "path": f"players.{receiver_id}.buildingLevels.{given_tile_id}", "value": 0},
+                        {
+                            "op": "set",
+                            "path": f"tiles.{given_tile_id}.ownerId",
+                            "value": receiver_id,
+                        },
+                        {
+                            "op": "set",
+                            "path": f"tiles.{given_tile_id}.buildingLevel",
+                            "value": 0,
+                        },
+                        {
+                            "op": "remove",
+                            "path": f"players.{player_id}.ownedTiles",
+                            "value": given_tile_id,
+                        },
+                        {
+                            "op": "remove",
+                            "path": f"players.{player_id}.buildingLevels",
+                            "value": str(given_tile_id),
+                        },
+                        {
+                            "op": "push",
+                            "path": f"players.{receiver_id}.ownedTiles",
+                            "value": given_tile_id,
+                        },
+                        {
+                            "op": "set",
+                            "path": f"players.{receiver_id}.buildingLevels.{given_tile_id}",
+                            "value": 0,
+                        },
                     ]
                 )
                 events.append(
