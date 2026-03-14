@@ -7,7 +7,7 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
     "id" SERIAL NOT NULL PRIMARY KEY,
     "round_count" SMALLINT NOT NULL  DEFAULT 0,
     "created_at" TIMESTAMPTZ NOT NULL  DEFAULT CURRENT_TIMESTAMP,
-    "winner_id" UUID REFERENCES "users" ("id") ON DELETE SET NULL
+    "winner_id" INT REFERENCES "users" ("id") ON DELETE SET NULL
 );
         CREATE TABLE IF NOT EXISTS "user_games" (
     "id" SERIAL NOT NULL PRIMARY KEY,
@@ -16,7 +16,7 @@ async def upgrade(db: BaseDBAsyncClient) -> str:
     "buildings_built" SMALLINT NOT NULL  DEFAULT 0,
     "placement" SMALLINT,
     "game_id" INT NOT NULL REFERENCES "games" ("id") ON DELETE CASCADE,
-    "user_id" UUID NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE,
+    "user_id" INT NOT NULL REFERENCES "users" ("id") ON DELETE CASCADE,
     CONSTRAINT "uid_user_games_user_id_06f037" UNIQUE ("user_id", "game_id")
 );
 CREATE INDEX IF NOT EXISTS "idx_user_games_game_id_88c866" ON "user_games" ("game_id");
