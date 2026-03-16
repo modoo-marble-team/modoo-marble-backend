@@ -152,8 +152,13 @@ async def _auto_bankrupt_after_timeout(
                 for player_id in state["players"]:
                     try:
                         await update_status(user_id=str(player_id), status="lobby")
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(
+                            "presence lobby 복귀 실패 (auto-bankrupt)",
+                            player_id=player_id,
+                            game_id=game_id,
+                            error=str(e),
+                        )
 
             patch_payload = serialize_game_patch(state, events=events, patches=patches)
             await sio.emit("game:patch", patch_payload, room=f"game:{game_id}")

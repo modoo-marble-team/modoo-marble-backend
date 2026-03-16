@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import socketio
+import structlog
 
 from app.game.actions.end_turn import process_end_turn
 from app.game.actions.roll_dice import process_roll_dice
@@ -23,6 +24,8 @@ from app.game.state import (
 )
 from app.game.timer import start_turn_timer
 
+logger = structlog.get_logger()
+
 PROMPT_RESPONSE_ACK_TYPE = "PROMPT_RESPONSE"
 
 
@@ -33,8 +36,13 @@ async def _revert_players_to_lobby(state: dict) -> None:
     for player_id in state["players"]:
         try:
             await update_status(user_id=str(player_id), status="lobby")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(
+                "presence lobby 복귀 실패 (game over)",
+                player_id=player_id,
+                game_id=state.get("game_id"),
+                error=str(e),
+            )
 
 
 def register_game_handlers(

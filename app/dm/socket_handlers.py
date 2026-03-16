@@ -113,6 +113,17 @@ def register_dm_handlers(
             )
             return
 
+        if receiver_status == "playing":
+            await sio.emit(
+                "game:error",
+                {
+                    "code": "DM_NOT_ALLOWED_IN_PLAYING",
+                    "message": "상대방이 게임 중이라 DM을 보낼 수 없습니다.",
+                },
+                to=sid,
+            )
+            return
+
         _dm_last_sent[sender_id] = now
 
         sender_info = await _get_sender_info(sender_id, sid_to_user)
