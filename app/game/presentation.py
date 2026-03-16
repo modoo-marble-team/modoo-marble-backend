@@ -25,7 +25,6 @@ NETWORK_KEY_MAP = {
     "current_tile_id": "currentTileId",
     "current_player_id": "currentPlayerId",
     "owned_tile_ids": "ownedTiles",
-    "owned_tiles": "ownedTiles",
     "building_level": "buildingLevel",
     "state_duration": "stateDuration",
     "known_revision": "knownRevision",
@@ -76,10 +75,10 @@ def _normalize_patch_path(path: str) -> str:
     return ".".join(PATCH_PATH_MAP.get(part, part) for part in path.split("."))
 
 
-def _serialize_patch_ops(patch: list[dict] | None) -> list[dict]:
+def _serialize_patch_ops(patch_ops: list[dict] | None) -> list[dict]:
     serialized: list[dict] = []
 
-    for item in patch or []:
+    for item in patch_ops or []:
         payload = {
             "op": _normalize_scalar(item.get("op")),
             "path": _normalize_patch_path(str(item.get("path", ""))),
@@ -89,6 +88,13 @@ def _serialize_patch_ops(patch: list[dict] | None) -> list[dict]:
         serialized.append(payload)
 
     return serialized
+
+
+def _get_state_value(state: dict, *keys: str, default: Any = None) -> Any:
+    for key in keys:
+        if key in state:
+            return state[key]
+    return default
 
 
 def serialize_game_snapshot(state: GameState) -> dict:
@@ -129,22 +135,29 @@ def serialize_game_snapshot(state: GameState) -> dict:
             }
         )
 
-    current_player_id = str(state["current_player_id"])
+    current_player_id = _get_state_value(
+        state,
+        "currentPlayerId",
+        "current_player_id",
+        default=None,
+    )
+    winner_id = _get_state_value(state, "winnerId", "winner_id", default=None)
+
     return {
-        "roomId": state["room_id"],
-        "gameId": state["game_id"],
+        "roomId": _get_state_value(state, "roomId", "room_id"),
+        "gameId": _get_state_value(state, "gameId", "game_id"),
         "revision": state["revision"],
         "phase": state["phase"] if state["status"] == "playing" else PHASE_GAME_OVER,
         "players": serialized_players,
         "tiles": tiles,
-        "currentPlayerId": current_player_id,
+        "currentPlayerId": str(current_player_id)
+        if current_player_id is not None
+        else None,
         "round": state["round"],
         "turnTimeoutSec": TURN_TIMEOUT_SECONDS,
         "prompt": serialize_prompt(state.get("pending_prompt")),
         "isGameOver": state["status"] != "playing",
-        "winnerId": str(state["winnerId"])
-        if state.get("winnerId") is not None
-        else None,
+        "winnerId": str(winner_id) if winner_id is not None else None,
     }
 
 
@@ -152,14 +165,14 @@ def serialize_game_patch(
     state: GameState,
     *,
     events: list[dict],
-    patch: list[dict] | None = None,
+    patches: list[dict] | None = None,
     include_snapshot: bool = True,
 ) -> dict:
     return {
-        "gameId": state["game_id"],
+        "gameId": _get_state_value(state, "gameId", "game_id"),
         "revision": state["revision"],
         "turn": state["turn"],
         "events": [_normalize_payload(event) for event in events],
-        "patch": _serialize_patch_ops(patch),
+        "patch": _serialize_patch_ops(patches),
         "snapshot": serialize_game_snapshot(state) if include_snapshot else None,
     }

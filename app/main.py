@@ -12,6 +12,7 @@ from tortoise import Tortoise
 from app.config import TORTOISE_ORM, settings
 from app.dm.socket_handlers import register_dm_handlers
 from app.errors import register_error_handlers
+from app.game.reconnect import mark_disconnected
 from app.game.socket_handlers import register_game_handlers
 from app.game.sync_runtime import (
     handle_game_socket_connect,
@@ -22,7 +23,7 @@ from app.game.sync_runtime import (
 from app.lobby.socket_handlers import register_lobby_handlers
 from app.models.user import User
 from app.presence import set_offline, set_online
-from app.redis_client import close_redis, init_redis
+from app.redis_client import close_redis, get_redis, init_redis
 from app.routers import auth, game, lobby, users
 from app.utils.jwt import decode_token
 
@@ -32,7 +33,9 @@ sio = socketio.AsyncServer(
     async_mode="asgi",
     cors_allowed_origins=settings.CORS_ORIGINS,
 )
+
 _sid_to_user: dict[str, int] = {}
+
 register_game_handlers(sio, _sid_to_user)
 register_lobby_handlers(sio, _sid_to_user)
 register_dm_handlers(sio, _sid_to_user)
@@ -97,12 +100,30 @@ async def disconnect(sid: str):
             nickname = user.nickname if user else ""
 
             await handle_game_socket_disconnect(sid=sid, user_id=int(user_id))
+            await _handle_game_disconnect(int(user_id))
             await set_offline(user_id=str(user_id))
             await _broadcast_user_status(int(user_id), nickname, "offline")
     except Exception:
         pass
     finally:
         _sid_to_user.pop(sid, None)
+
+
+async def _handle_game_disconnect(user_id: int) -> None:
+    try:
+        redis = get_redis()
+        game_id = await redis.get(f"user:{user_id}:game")
+        if game_id is None:
+            return
+
+        await mark_disconnected(
+            game_id=game_id,
+            user_id=user_id,
+            sio=sio,
+            sid_to_user=_sid_to_user,
+        )
+    except Exception:
+        pass
 
 
 @asynccontextmanager
