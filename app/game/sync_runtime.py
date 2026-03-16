@@ -610,9 +610,9 @@ class GameSyncRuntime:
 
                     patch.extend(
                         [
-                            {"op": "set", "path": "status", "value": "finished"},
+                            {"op": "set", "path": "isGameOver", "value": True},
                             {"op": "set", "path": "phase", "value": PHASE_GAME_OVER},
-                            {"op": "set", "path": "pending_prompt", "value": None},
+                            {"op": "set", "path": "prompt", "value": None},
                         ]
                     )
                     events.append(
@@ -664,17 +664,17 @@ class GameSyncRuntime:
             [
                 {
                     "op": "set",
-                    "path": f"players.{player_id}.state",
+                    "path": f"players.{player_id}.playerState",
                     "value": PlayerState.BANKRUPT,
                 },
                 {
                     "op": "set",
-                    "path": f"players.{player_id}.state_duration",
+                    "path": f"players.{player_id}.stateDuration",
                     "value": 0,
                 },
                 {
                     "op": "set",
-                    "path": f"players.{player_id}.consecutive_doubles",
+                    "path": f"players.{player_id}.consecutiveDoubles",
                     "value": 0,
                 },
             ]
@@ -717,7 +717,7 @@ class GameSyncRuntime:
             and pending_prompt.get("player_id") == player_id
         ):
             state["pending_prompt"] = None
-            patch.append({"op": "set", "path": "pending_prompt", "value": None})
+            patch.append({"op": "set", "path": "prompt", "value": None})
 
         events.append(
             {
@@ -743,9 +743,9 @@ class GameSyncRuntime:
             state["pending_prompt"] = None
             patch.extend(
                 [
-                    {"op": "set", "path": "status", "value": "finished"},
+                    {"op": "set", "path": "isGameOver", "value": True},
                     {"op": "set", "path": "phase", "value": PHASE_GAME_OVER},
-                    {"op": "set", "path": "pending_prompt", "value": None},
+                    {"op": "set", "path": "prompt", "value": None},
                 ]
             )
             events.append(
@@ -783,7 +783,7 @@ class GameSyncRuntime:
                 {"op": "set", "path": "turn", "value": new_turn},
                 {"op": "set", "path": "round", "value": new_round},
                 {"op": "set", "path": "phase", "value": PHASE_WAIT_ROLL},
-                {"op": "set", "path": "pending_prompt", "value": None},
+                {"op": "set", "path": "prompt", "value": None},
             ]
         )
         events.append(

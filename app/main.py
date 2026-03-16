@@ -90,9 +90,12 @@ async def disconnect(sid: str):
 
     try:
         if user_id is not None:
+            user = await User.get_or_none(id=int(user_id), deleted_at__isnull=True)
+            nickname = user.nickname if user else ""
+
             await handle_game_socket_disconnect(sid=sid, user_id=int(user_id))
             await set_offline(user_id=str(user_id))
-            await _broadcast_user_status(int(user_id), "", "offline")
+            await _broadcast_user_status(int(user_id), nickname, "offline")
     except Exception:
         pass
     finally:
