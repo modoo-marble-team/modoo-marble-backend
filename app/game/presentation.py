@@ -25,6 +25,7 @@ NETWORK_KEY_MAP = {
     "current_tile_id": "currentTileId",
     "current_player_id": "currentPlayerId",
     "owned_tile_ids": "ownedTiles",
+    "owned_tiles": "ownedTiles",
     "building_level": "buildingLevel",
     "state_duration": "stateDuration",
     "known_revision": "knownRevision",
@@ -116,7 +117,6 @@ def serialize_game_snapshot(state: GameState) -> dict:
         serialized_players.append(
             {
                 "playerId": str(player["playerId"]),
-                "name": player["nickname"],
                 "nickname": player["nickname"],
                 "currentTileId": player["currentTileId"],
                 "balance": player["balance"],
@@ -142,7 +142,9 @@ def serialize_game_snapshot(state: GameState) -> dict:
         "turnTimeoutSec": TURN_TIMEOUT_SECONDS,
         "prompt": serialize_prompt(state.get("pending_prompt")),
         "isGameOver": state["status"] != "playing",
-        "winnerId": None,
+        "winnerId": str(state["winnerId"])
+        if state.get("winnerId") is not None
+        else None,
     }
 
 

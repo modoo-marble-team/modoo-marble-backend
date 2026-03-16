@@ -22,7 +22,6 @@ from app.game.state import (
 )
 from app.game.sync_runtime import init_game_sync_runtime
 from app.game.timer import start_turn_timer
-from app.services.room_service import RoomService
 
 logger = structlog.get_logger()
 
@@ -49,7 +48,6 @@ def register_game_handlers(
     sio: socketio.AsyncServer,
     sid_to_user: dict[str, int],
 ) -> None:
-    room_service = RoomService()
     sync_runtime = init_game_sync_runtime(sio)
 
     async def emit_prompt_if_needed(state: dict) -> None:
@@ -125,70 +123,6 @@ def register_game_handlers(
             apply_patches(state, end_patches)
             events.extend(end_events)
             patches.extend(end_patches)
-
-    @sio.on("enter_room")
-    async def enter_room(sid: str, data: dict) -> None:
-        user_id = sid_to_user.get(sid)
-        room_id = str(data.get("room_id") or "")
-
-        if user_id is None:
-            await sio.emit(
-                "game:error",
-                {"code": "AUTH_REQUIRED", "message": "Authentication required."},
-                to=sid,
-            )
-            return
-
-        room = await room_service.get_room(room_id)
-        if room is None:
-            await sio.emit(
-                "game:error",
-                {"code": "ROOM_NOT_FOUND", "message": "Room not found."},
-                to=sid,
-            )
-            return
-
-        if not any(player["id"] == str(user_id) for player in room["players"]):
-            await sio.emit(
-                "game:error",
-                {"code": "NOT_ROOM_MEMBER", "message": "You are not in this room."},
-                to=sid,
-            )
-            return
-
-        await sio.enter_room(sid, f"room:{room_id}")
-
-    @sio.on("leave_room")
-    async def leave_room(sid: str, data: dict) -> None:
-        room_id = str(data.get("room_id") or "")
-        if room_id:
-            await sio.leave_room(sid, f"room:{room_id}")
-
-    @sio.on("send_chat")
-    async def send_chat(sid: str, data: dict) -> None:
-        user_id = sid_to_user.get(sid)
-        room_id = str(data.get("room_id") or "")
-        message = str(data.get("message") or "").strip()
-
-        if user_id is None:
-            await sio.emit(
-                "game:error",
-                {"code": "AUTH_REQUIRED", "message": "Authentication required."},
-                to=sid,
-            )
-            return
-
-        if not room_id or not message:
-            return
-
-        _room, chat_message = await room_service.add_chat_message(
-            room_id=room_id,
-            user_id=user_id,
-            message=message,
-        )
-        await sio.emit(
-            "chat", {"room_id": room_id, **chat_message}, room=f"room:{room_id}"
-        )
 
     @sio.on("game:sync")
     async def game_sync(sid: str, data: dict) -> None:
@@ -309,6 +243,7 @@ def register_game_handlers(
                     events, patches = process_roll_dice(state, user_id)
                     apply_patches(state, patches)
                     maybe_end_turn(state, user_id, events, patches)
+
                 elif action_type == ActionType.BUY_PROPERTY:
                     payload = (
                         data.get("payload")
@@ -323,6 +258,7 @@ def register_game_handlers(
                     )
                     apply_patches(state, patches)
                     maybe_end_turn(state, user_id, events, patches)
+
                 elif action_type == ActionType.SELL_PROPERTY:
                     payload = (
                         data.get("payload")
@@ -345,9 +281,11 @@ def register_game_handlers(
                     )
                     apply_patches(state, patches)
                     maybe_end_turn(state, user_id, events, patches)
+
                 elif action_type == ActionType.END_TURN:
                     events, patches = process_end_turn(state, user_id)
                     apply_patches(state, patches)
+
                 else:
                     await sio.emit(
                         "game:ack",

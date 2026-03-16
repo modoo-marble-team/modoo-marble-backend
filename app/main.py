@@ -10,6 +10,7 @@ from starlette.middleware.cors import CORSMiddleware
 from tortoise import Tortoise
 
 from app.config import TORTOISE_ORM, settings
+from app.dm.socket_handlers import register_dm_handlers
 from app.errors import register_error_handlers
 from app.game.socket_handlers import register_game_handlers
 from app.game.sync_runtime import (
@@ -18,6 +19,7 @@ from app.game.sync_runtime import (
     start_game_sync_scheduler,
     stop_game_sync_scheduler,
 )
+from app.lobby.socket_handlers import register_lobby_handlers
 from app.models.user import User
 from app.presence import set_offline, set_online
 from app.redis_client import close_redis, init_redis
@@ -32,6 +34,8 @@ sio = socketio.AsyncServer(
 )
 _sid_to_user: dict[str, int] = {}
 register_game_handlers(sio, _sid_to_user)
+register_lobby_handlers(sio, _sid_to_user)
+register_dm_handlers(sio, _sid_to_user)
 
 
 async def _broadcast_user_status(user_id: int, nickname: str, status: str) -> None:
