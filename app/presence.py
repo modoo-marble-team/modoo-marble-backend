@@ -14,6 +14,22 @@ async def set_online(*, user_id: str, nickname: str, status: str = "online") -> 
     await redis.hset(_PRESENCE_KEY, user_id, data)
 
 
+async def update_status(*, user_id: str, status: str) -> None:
+    """이미 온라인인 유저의 상태만 업데이트 (lobby / in_room / playing).
+
+    hget → modify → hset 패턴의 race condition을 방지하기 위해
+    유저별 Redis lock으로 원자성을 보장한다.
+    """
+    redis = get_redis()
+    async with redis.lock(f"presence:lock:{user_id}", timeout=5):
+        raw = await redis.hget(_PRESENCE_KEY, user_id)
+        if raw is None:
+            return
+        data = json.loads(raw)
+        data["status"] = status
+        await redis.hset(_PRESENCE_KEY, user_id, json.dumps(data))
+
+
 async def set_offline(*, user_id: str) -> None:
     redis = get_redis()
     await redis.hdel(_PRESENCE_KEY, user_id)

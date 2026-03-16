@@ -89,6 +89,18 @@ def register_dm_handlers(
             )
             return
 
+        sender_status = await get_user_status(str(sender_id))
+        if sender_status == "playing":
+            await sio.emit(
+                "game:error",
+                {
+                    "code": "DM_NOT_ALLOWED_IN_PLAYING",
+                    "message": "게임 중에는 DM을 보낼 수 없습니다.",
+                },
+                to=sid,
+            )
+            return
+
         receiver_status = await get_user_status(str(receiver_id))
         if receiver_status is None:
             await sio.emit(
@@ -96,6 +108,17 @@ def register_dm_handlers(
                 {
                     "code": "DM_TARGET_OFFLINE",
                     "message": "상대방이 오프라인 상태입니다.",
+                },
+                to=sid,
+            )
+            return
+
+        if receiver_status == "playing":
+            await sio.emit(
+                "game:error",
+                {
+                    "code": "DM_NOT_ALLOWED_IN_PLAYING",
+                    "message": "상대방이 게임 중이라 DM을 보낼 수 없습니다.",
                 },
                 to=sid,
             )

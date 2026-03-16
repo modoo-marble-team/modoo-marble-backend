@@ -68,10 +68,10 @@ async def connect(sid: str, environ: dict, auth_data: dict | None):
             raise ConnectionRefusedError("User not found or deleted")
 
         _sid_to_user[sid] = int(user.id)
-        await set_online(user_id=str(user.id), nickname=user.nickname, status="online")
+        await set_online(user_id=str(user.id), nickname=user.nickname, status="lobby")
 
         await sio.enter_room(sid, f"user:{user.id}")
-        await _broadcast_user_status(int(user.id), user.nickname, "online")
+        await _broadcast_user_status(int(user.id), user.nickname, "lobby")
         return True
     except ConnectionRefusedError as e:
         raise e

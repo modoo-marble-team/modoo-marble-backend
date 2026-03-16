@@ -9,6 +9,7 @@ from app.game.state import init_game_state
 from app.models.game import Game
 from app.models.user import User
 from app.models.user_game import UserGame
+from app.presence import update_status
 from app.redis_client import get_redis
 
 ROOMS_INDEX_KEY = "rooms:index"
@@ -368,6 +369,10 @@ class RoomService:
                 str(game.id),
                 ex=ROOM_TTL_SECONDS,
             )
+
+        # 참여 플레이어 presence 상태를 "playing"으로 업데이트
+        for player_id in player_ids:
+            await update_status(user_id=str(player_id), status="playing")
 
         room["status"] = "playing"
         room["game_id"] = str(game.id)

@@ -122,16 +122,4 @@ def process_end_turn(
             }
         )
 
-    # ── 20라운드 종료 조건 ───────────────────────────────
-    if new_round > MAX_ROUNDS:
-        patches.append({"op": "set", "path": "status", "value": "finished"})
-        winner = _find_winner(state)
-        events.append(
-            {
-                "type": ServerEventType.GAME_OVER,
-                "reason": "max_rounds",
-                "winner": winner,
-            }
-        )
-
     return events, patches
