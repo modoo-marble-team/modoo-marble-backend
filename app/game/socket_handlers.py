@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import socketio
+import structlog
 
 from app.game.actions.end_turn import process_end_turn
 from app.game.actions.roll_dice import process_roll_dice
@@ -23,7 +24,25 @@ from app.game.state import (
 )
 from app.game.timer import start_turn_timer
 
+logger = structlog.get_logger()
+
 PROMPT_RESPONSE_ACK_TYPE = "PROMPT_RESPONSE"
+
+
+async def _revert_players_to_lobby(state: dict) -> None:
+    """게임 종료 시 모든 플레이어의 presence 상태를 'lobby'로 되돌린다."""
+    from app.presence import update_status
+
+    for player_id in state["players"]:
+        try:
+            await update_status(user_id=str(player_id), status="lobby")
+        except Exception as e:
+            logger.warning(
+                "presence lobby 복귀 실패 (game over)",
+                player_id=player_id,
+                game_id=state.get("game_id"),
+                error=str(e),
+            )
 
 
 def register_game_handlers(
@@ -264,6 +283,9 @@ def register_game_handlers(
                 state["revision"] += 1
                 await save_game_state(game_id, state)
 
+                if state["status"] == "finished":
+                    await _revert_players_to_lobby(state)
+
         except LockAcquisitionError:
             await sio.emit(
                 "game:ack",
@@ -386,6 +408,9 @@ def register_game_handlers(
 
                 state["revision"] += 1
                 await save_game_state(game_id, state)
+
+                if state["status"] == "finished":
+                    await _revert_players_to_lobby(state)
 
         except LockAcquisitionError:
             await sio.emit(
