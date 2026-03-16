@@ -381,9 +381,9 @@ def test_max_rounds_triggers_game_over_exactly_once():
     apply_patches(state, patches)
 
     game_over_events = [e for e in events if e["type"] == ServerEventType.GAME_OVER]
-    assert (
-        len(game_over_events) == 1
-    ), f"GAME_OVER가 {len(game_over_events)}번 발생했습니다 (중복 블록 버그 재현)"
+    assert len(game_over_events) == 1, (
+        f"GAME_OVER가 {len(game_over_events)}번 발생했습니다 (중복 블록 버그 재현)"
+    )
     assert game_over_events[0]["reason"] == "max_rounds"
     assert state["status"] == "finished"
 
