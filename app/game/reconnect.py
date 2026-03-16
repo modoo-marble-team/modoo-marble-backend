@@ -146,6 +146,15 @@ async def _auto_bankrupt_after_timeout(
 
             await save_game_state(game_id, state)
 
+            if state["status"] == "finished":
+                from app.presence import update_status
+
+                for player_id in state["players"]:
+                    try:
+                        await update_status(user_id=str(player_id), status="lobby")
+                    except Exception:
+                        pass
+
             patch_payload = serialize_game_patch(state, events=events, patches=patches)
             await sio.emit("game:patch", patch_payload, room=f"game:{game_id}")
 

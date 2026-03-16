@@ -26,6 +26,17 @@ from app.game.timer import start_turn_timer
 PROMPT_RESPONSE_ACK_TYPE = "PROMPT_RESPONSE"
 
 
+async def _revert_players_to_lobby(state: dict) -> None:
+    """게임 종료 시 모든 플레이어의 presence 상태를 'lobby'로 되돌린다."""
+    from app.presence import update_status
+
+    for player_id in state["players"]:
+        try:
+            await update_status(user_id=str(player_id), status="lobby")
+        except Exception:
+            pass
+
+
 def register_game_handlers(
     sio: socketio.AsyncServer,
     sid_to_user: dict[str, int],
@@ -264,6 +275,9 @@ def register_game_handlers(
                 state["revision"] += 1
                 await save_game_state(game_id, state)
 
+                if state["status"] == "finished":
+                    await _revert_players_to_lobby(state)
+
         except LockAcquisitionError:
             await sio.emit(
                 "game:ack",
@@ -386,6 +400,9 @@ def register_game_handlers(
 
                 state["revision"] += 1
                 await save_game_state(game_id, state)
+
+                if state["status"] == "finished":
+                    await _revert_players_to_lobby(state)
 
         except LockAcquisitionError:
             await sio.emit(

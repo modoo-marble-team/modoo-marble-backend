@@ -6,12 +6,12 @@ from pydantic import BaseModel, Field
 class CreateRoomRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=30)
     is_private: bool = False
-    password: str | None = Field(default=None, max_length=20)
+    password: str | None = Field(default=None, pattern=r"^\d{4}$")
     max_players: int = Field(default=4, ge=2, le=4)
 
 
 class JoinRoomRequest(BaseModel):
-    password: str | None = Field(default=None, max_length=20)
+    password: str | None = Field(default=None, pattern=r"^\d{4}$")
 
 
 class RoomCardResponse(BaseModel):
