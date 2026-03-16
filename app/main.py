@@ -76,9 +76,8 @@ async def connect(sid: str, environ: dict, auth_data: dict | None):
 
         _sid_to_user[sid] = int(user.id)
         await handle_game_socket_connect(sid=sid, user_id=int(user.id))
-        await set_online(user_id=str(user.id), nickname=user.nickname, status="online")
-        await set_online(user_id=str(user.id), nickname=user.nickname, status="lobby")
 
+        await set_online(user_id=str(user.id), nickname=user.nickname, status="lobby")
         await sio.enter_room(sid, f"user:{user.id}")
         await _broadcast_user_status(int(user.id), user.nickname, "lobby")
         return True
