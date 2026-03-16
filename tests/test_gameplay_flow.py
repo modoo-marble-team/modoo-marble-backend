@@ -325,9 +325,23 @@ def test_travel_prompt_moves_to_selected_tile_and_chains_into_tile_prompt():
 
 
 def test_bankrupt_player_is_skipped_in_turn_order(monkeypatch):
-    """파산한 플레이어는 턴 순서에서 제외되고, 남은 플레이어가 다음 턴을 받는다."""
+    """파산한 플레이어는 턴 순서에서 제외되고, 다음 활성 플레이어에게 턴이 넘어간다.
+    3명(1→2→3) 중 player 2가 파산 → player 1 턴 종료 시 player 3으로 건너뛰어야 한다."""
     state = make_state()
-    # 플레이어 2를 파산 처리 → player 1이 계속 진행
+    # 3번째 플레이어 추가 (turnOrder=2)
+    state["players"]["3"] = {
+        "playerId": 3,
+        "nickname": "third",
+        "balance": 5000,
+        "currentTileId": 0,
+        "playerState": PlayerState.NORMAL,
+        "stateDuration": 0,
+        "consecutiveDoubles": 0,
+        "ownedTiles": [],
+        "buildingLevels": {},
+        "turnOrder": 2,
+    }
+    # player 2(turnOrder=1)를 파산 처리 → 1→3 순서로 건너뛰어야 함
     state["players"]["2"]["playerState"] = PlayerState.BANKRUPT
 
     monkeypatch.setattr(
@@ -341,13 +355,25 @@ def test_bankrupt_player_is_skipped_in_turn_order(monkeypatch):
 
     roll_events, roll_patches = process_roll_dice(state, 1)
     apply_patches(state, roll_patches)
+
+    # 부동산 착지로 프롬프트가 생긴 경우 SKIP 처리 후 턴 종료
+    if state.get("pending_prompt"):
+        prompt = state["pending_prompt"]
+        _, prompt_patches = process_prompt_response(
+            state,
+            player_id=1,
+            prompt_id=prompt["prompt_id"],
+            choice="SKIP",
+        )
+        apply_patches(state, prompt_patches)
+
     end_events, end_patches = process_end_turn(state, 1)
     apply_patches(state, end_patches)
 
-    # 파산한 player 2를 건너뛰어 다시 player 1의 턴
-    assert state["current_player_id"] == 1
+    # 파산한 player 2(turnOrder=1)를 건너뛰어 player 3(turnOrder=2)의 턴
     assert end_events[0]["type"] == "TURN_ENDED"
-    assert end_events[0]["nextPlayerId"] == 1
+    assert state["current_player_id"] == 3
+    assert end_events[0]["nextPlayerId"] == 3
 
 
 def test_last_player_standing_triggers_game_over():
