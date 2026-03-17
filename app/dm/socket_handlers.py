@@ -34,7 +34,11 @@ def register_dm_handlers(
                 {"code": "AUTH_REQUIRED", "message": "인증이 필요합니다."},
                 to=sid,
             )
-            return {"ok": False, "code": "AUTH_REQUIRED", "message": "인증이 필요합니다."}
+            return {
+                "ok": False,
+                "code": "AUTH_REQUIRED",
+                "message": "인증이 필요합니다.",
+            }
 
         receiver_id = data.get("receiver_id")
         message = str(data.get("message") or "").strip()
@@ -46,7 +50,11 @@ def register_dm_handlers(
                 {"code": "DM_EMPTY_MESSAGE", "message": "메시지가 비어있습니다."},
                 to=sid,
             )
-            return {"ok": False, "code": "DM_EMPTY_MESSAGE", "message": "메시지가 비어있습니다."}
+            return {
+                "ok": False,
+                "code": "DM_EMPTY_MESSAGE",
+                "message": "메시지가 비어있습니다.",
+            }
 
         if len(message) > DM_MAX_LENGTH:
             await sio.emit(
@@ -69,7 +77,11 @@ def register_dm_handlers(
                 {"code": "DM_TARGET_NOT_FOUND", "message": "수신 대상을 지정해주세요."},
                 to=sid,
             )
-            return {"ok": False, "code": "DM_TARGET_NOT_FOUND", "message": "수신 대상을 지정해주세요."}
+            return {
+                "ok": False,
+                "code": "DM_TARGET_NOT_FOUND",
+                "message": "수신 대상을 지정해주세요.",
+            }
 
         receiver_id = int(receiver_id)
         if receiver_id == sender_id:
