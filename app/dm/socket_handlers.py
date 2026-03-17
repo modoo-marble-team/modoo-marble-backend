@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from uuid import uuid4
 
 import socketio
@@ -8,8 +7,6 @@ import socketio
 from app.presence import get_user_status
 
 DM_MAX_LENGTH = 500
-DM_RATE_LIMIT_SECONDS = 1.0
-_dm_last_sent: dict[int, float] = {}
 
 
 def register_dm_handlers(
@@ -23,15 +20,25 @@ def register_dm_handlers(
         return None
 
     @sio.on("dm_send")
-    async def dm_send(sid: str, data: dict) -> None:
+    async def dm_send(sid: str, data: dict) -> dict:
+        """DM 전송 핸들러.
+
+        Returns:
+            ACK dict — {"ok": True, "message_id": "...", "client_message_id": "..."}
+                     — {"ok": False, "code": "...", "message": "..."}
+        """
         sender_id = sid_to_user.get(sid)
         if sender_id is None:
             await sio.emit(
-                "game:error",
+                "dm:error",
                 {"code": "AUTH_REQUIRED", "message": "인증이 필요합니다."},
                 to=sid,
             )
-            return
+            return {
+                "ok": False,
+                "code": "AUTH_REQUIRED",
+                "message": "인증이 필요합니다.",
+            }
 
         receiver_id = data.get("receiver_id")
         message = str(data.get("message") or "").strip()
@@ -39,92 +46,105 @@ def register_dm_handlers(
 
         if not message:
             await sio.emit(
-                "game:error",
+                "dm:error",
                 {"code": "DM_EMPTY_MESSAGE", "message": "메시지가 비어있습니다."},
                 to=sid,
             )
-            return
+            return {
+                "ok": False,
+                "code": "DM_EMPTY_MESSAGE",
+                "message": "메시지가 비어있습니다.",
+            }
 
         if len(message) > DM_MAX_LENGTH:
             await sio.emit(
-                "game:error",
+                "dm:error",
                 {
                     "code": "DM_MESSAGE_TOO_LONG",
                     "message": f"메시지는 {DM_MAX_LENGTH}자 이내여야 합니다.",
                 },
                 to=sid,
             )
-            return
+            return {
+                "ok": False,
+                "code": "DM_MESSAGE_TOO_LONG",
+                "message": f"메시지는 {DM_MAX_LENGTH}자 이내여야 합니다.",
+            }
 
         if receiver_id is None:
             await sio.emit(
-                "game:error",
+                "dm:error",
                 {"code": "DM_TARGET_NOT_FOUND", "message": "수신 대상을 지정해주세요."},
                 to=sid,
             )
-            return
+            return {
+                "ok": False,
+                "code": "DM_TARGET_NOT_FOUND",
+                "message": "수신 대상을 지정해주세요.",
+            }
 
         receiver_id = int(receiver_id)
         if receiver_id == sender_id:
             await sio.emit(
-                "game:error",
+                "dm:error",
                 {
                     "code": "DM_TARGET_NOT_FOUND",
                     "message": "자기 자신에게 DM을 보낼 수 없습니다.",
                 },
                 to=sid,
             )
-            return
-
-        now = time.monotonic()
-        last_sent = _dm_last_sent.get(sender_id, 0.0)
-        if now - last_sent < DM_RATE_LIMIT_SECONDS:
-            await sio.emit(
-                "game:error",
-                {
-                    "code": "DM_RATE_LIMITED",
-                    "message": "메시지를 너무 빠르게 보내고 있습니다.",
-                },
-                to=sid,
-            )
-            return
+            return {
+                "ok": False,
+                "code": "DM_TARGET_NOT_FOUND",
+                "message": "자기 자신에게 DM을 보낼 수 없습니다.",
+            }
 
         sender_status = await get_user_status(str(sender_id))
         if sender_status == "playing":
             await sio.emit(
-                "game:error",
+                "dm:error",
                 {
                     "code": "DM_NOT_ALLOWED_IN_PLAYING",
                     "message": "게임 중에는 DM을 보낼 수 없습니다.",
                 },
                 to=sid,
             )
-            return
+            return {
+                "ok": False,
+                "code": "DM_NOT_ALLOWED_IN_PLAYING",
+                "message": "게임 중에는 DM을 보낼 수 없습니다.",
+            }
 
         receiver_status = await get_user_status(str(receiver_id))
         if receiver_status is None:
             await sio.emit(
-                "game:error",
+                "dm:error",
                 {
                     "code": "DM_TARGET_OFFLINE",
                     "message": "상대방이 오프라인 상태입니다.",
                 },
                 to=sid,
             )
-            return
+            return {
+                "ok": False,
+                "code": "DM_TARGET_OFFLINE",
+                "message": "상대방이 오프라인 상태입니다.",
+            }
 
         if receiver_status == "playing":
             await sio.emit(
-                "game:error",
+                "dm:error",
                 {
                     "code": "DM_NOT_ALLOWED_IN_PLAYING",
                     "message": "상대방이 게임 중이라 DM을 보낼 수 없습니다.",
                 },
                 to=sid,
             )
-            return
-
-        _dm_last_sent[sender_id] = now
+            return {
+                "ok": False,
+                "code": "DM_NOT_ALLOWED_IN_PLAYING",
+                "message": "상대방이 게임 중이라 DM을 보낼 수 없습니다.",
+            }
 
         sender_info = await _get_sender_info(sender_id, sid_to_user)
 
@@ -142,6 +162,11 @@ def register_dm_handlers(
             dm_payload["client_message_id"] = client_message_id
 
         await sio.emit("dm_receive", dm_payload, room=f"user:{receiver_id}")
+
+        ack: dict = {"ok": True, "message_id": message_id}
+        if client_message_id:
+            ack["client_message_id"] = client_message_id
+        return ack
 
 
 async def _get_sender_info(sender_id: int, sid_to_user: dict) -> dict:
