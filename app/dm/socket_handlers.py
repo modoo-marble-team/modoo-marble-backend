@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import time
 from uuid import uuid4
 
 import socketio
@@ -8,8 +7,6 @@ import socketio
 from app.presence import get_user_status
 
 DM_MAX_LENGTH = 500
-DM_RATE_LIMIT_SECONDS = 0.3  # 300ms — 빠른 연속 전송 허용
-_dm_last_sent: dict[int, float] = {}
 
 
 def register_dm_handlers(
@@ -90,29 +87,6 @@ def register_dm_handlers(
                 "message": "자기 자신에게 DM을 보낼 수 없습니다.",
             }
 
-        now = time.monotonic()
-        last_sent = _dm_last_sent.get(sender_id, 0.0)
-        if now - last_sent < DM_RATE_LIMIT_SECONDS:
-            await sio.emit(
-                "dm:error",
-                {
-                    "code": "DM_RATE_LIMITED",
-                    "message": "메시지를 너무 빠르게 보내고 있습니다.",
-                    "retry_after_ms": int(
-                        (DM_RATE_LIMIT_SECONDS - (now - last_sent)) * 1000
-                    ),
-                },
-                to=sid,
-            )
-            return {
-                "ok": False,
-                "code": "DM_RATE_LIMITED",
-                "message": "메시지를 너무 빠르게 보내고 있습니다.",
-                "retry_after_ms": int(
-                    (DM_RATE_LIMIT_SECONDS - (now - last_sent)) * 1000
-                ),
-            }
-
         sender_status = await get_user_status(str(sender_id))
         if sender_status == "playing":
             await sio.emit(
@@ -159,8 +133,6 @@ def register_dm_handlers(
                 "code": "DM_NOT_ALLOWED_IN_PLAYING",
                 "message": "상대방이 게임 중이라 DM을 보낼 수 없습니다.",
             }
-
-        _dm_last_sent[sender_id] = now
 
         sender_info = await _get_sender_info(sender_id, sid_to_user)
 
