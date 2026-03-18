@@ -160,7 +160,7 @@ class GameSyncRuntime:
                         "current_revision": current_revision,
                     }
                 ],
-                patch=[],
+                patches=[],
                 include_snapshot=True,
             )
             await self._sio.emit("game:patch", packet, to=sid)
@@ -179,7 +179,7 @@ class GameSyncRuntime:
                         "snapshot_revision": current_revision,
                     }
                 ],
-                patch=[],
+                patches=[],
                 include_snapshot=True,
             )
             await self._emit_desync(
@@ -201,7 +201,7 @@ class GameSyncRuntime:
                         "current_revision": current_revision,
                     }
                 ],
-                patch=[],
+                patches=[],
                 include_snapshot=False,
             )
             await self._sio.emit("game:patch", packet, to=sid)
@@ -233,7 +233,7 @@ class GameSyncRuntime:
                     "snapshot_revision": current_revision,
                 }
             ],
-            patch=[],
+            patches=[],
             include_snapshot=True,
         )
         await self._sio.emit("game:patch", snapshot_packet, to=sid)
@@ -244,13 +244,13 @@ class GameSyncRuntime:
         *,
         state: dict[str, Any],
         events: list[dict[str, Any]],
-        patch: list[dict[str, Any]],
+        patches: list[dict[str, Any]],
         include_snapshot: bool = False,
     ) -> dict[str, Any]:
         packet = serialize_game_patch(
             state,
             events=events,
-            patch=patch,
+            patches=patches,
             include_snapshot=include_snapshot,
         )
         await self.append_patch_packet(game_id=str(state["game_id"]), packet=packet)
@@ -636,7 +636,7 @@ class GameSyncRuntime:
                 packet = await self.build_and_store_patch_packet(
                     state=state,
                     events=events,
-                    patch=patch,
+                    patches=patch,
                     include_snapshot=False,
                 )
 
