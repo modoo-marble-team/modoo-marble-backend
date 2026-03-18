@@ -4,6 +4,7 @@ from urllib.parse import urlencode
 from uuid import uuid4
 
 import httpx
+import structlog
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
 from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
@@ -29,6 +30,7 @@ from app.utils.refresh_session import (
 router = APIRouter(tags=["Auth"])
 http_client = httpx.AsyncClient(timeout=10.0)
 auth_service = AuthService(http_client=http_client)
+logger = structlog.get_logger()
 
 
 def _refresh_ttl_seconds() -> int:
@@ -40,7 +42,7 @@ def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
         key=settings.REFRESH_COOKIE_NAME,
         value=refresh_token,
         httponly=True,
-        secure=settings.REFRESH_COOKIE_SECURE,
+        secure=bool(settings.REFRESH_COOKIE_SECURE),
         samesite=settings.REFRESH_COOKIE_SAMESITE,
         max_age=_refresh_ttl_seconds(),
         path=settings.REFRESH_COOKIE_PATH,
@@ -54,6 +56,13 @@ def _clear_refresh_cookie(response: Response) -> None:
         path=settings.REFRESH_COOKIE_PATH,
         domain=settings.REFRESH_COOKIE_DOMAIN or None,
     )
+
+
+def _raise_invalid_refresh(
+    response: Response, detail: str = "Invalid refresh token"
+) -> None:
+    _clear_refresh_cookie(response)
+    raise HTTPException(status_code=401, detail=detail)
 
 
 async def _issue_refresh_token(*, user_id: int) -> str:
@@ -205,14 +214,12 @@ async def refresh_access_token(
         raise HTTPException(status_code=401, detail="Invalid refresh token") from e
 
     if payload.get("type") != "refresh":
-        _clear_refresh_cookie(response)
-        raise HTTPException(status_code=401, detail="Invalid refresh token")
+        _raise_invalid_refresh(response)
 
     sub = payload.get("sub")
     jti = payload.get("jti")
     if not sub or not jti:
-        _clear_refresh_cookie(response)
-        raise HTTPException(status_code=401, detail="Invalid refresh token")
+        _raise_invalid_refresh(response)
 
     try:
         user_id = int(sub)
@@ -222,14 +229,12 @@ async def refresh_access_token(
 
     stored_user_id = await get_refresh_session(str(jti))
     if stored_user_id is None or stored_user_id != str(user_id):
-        _clear_refresh_cookie(response)
-        raise HTTPException(status_code=401, detail="Invalid refresh token")
+        _raise_invalid_refresh(response)
 
     user = await User.get_or_none(id=user_id, deleted_at__isnull=True)
     if not user:
         await delete_refresh_session(str(jti))
-        _clear_refresh_cookie(response)
-        raise HTTPException(status_code=401, detail="Invalid refresh token")
+        _raise_invalid_refresh(response)
 
     await delete_refresh_session(str(jti))
 
@@ -266,8 +271,10 @@ async def logout(
             jti = payload.get("jti")
             if jti:
                 await delete_refresh_session(str(jti))
-        except Exception:
+        except (ExpiredSignatureError, InvalidTokenError):
             pass
+        except Exception as e:
+            logger.exception("refresh session revoke failed", error=str(e))
 
     _clear_refresh_cookie(response)
     return LogoutResponse(success=True)

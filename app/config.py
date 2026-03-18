@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,7 +29,7 @@ class Settings(BaseSettings):
     KAKAO_ME_URL: str = "https://kapi.kakao.com/v2/user/me"
 
     REFRESH_COOKIE_NAME: str = "modoo_refresh_token"
-    REFRESH_COOKIE_SECURE: bool = False
+    REFRESH_COOKIE_SECURE: bool | None = None
     REFRESH_COOKIE_SAMESITE: str = "lax"
     REFRESH_COOKIE_PATH: str = "/api/auth"
     REFRESH_COOKIE_DOMAIN: str = ""
@@ -48,6 +49,12 @@ class Settings(BaseSettings):
     GAME_SYNC_WORKER_COUNT: int = 10
     GAME_SYNC_LEADER_TTL_SECONDS: int = 5
     GAME_SYNC_PATCH_KEEP_COUNT: int = 200
+
+    @model_validator(mode="after")
+    def set_refresh_cookie_secure_default(self) -> Settings:
+        if self.REFRESH_COOKIE_SECURE is None:
+            self.REFRESH_COOKIE_SECURE = self.APP_ENV != "development"
+        return self
 
 
 settings = Settings()
