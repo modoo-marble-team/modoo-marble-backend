@@ -16,12 +16,7 @@ async def save_refresh_session(*, jti: str, user_id: int, ttl_seconds: int) -> N
 
 async def get_refresh_session(jti: str) -> str | None:
     redis = await get_redis()
-    value = await redis.get(_key(jti))
-    if value is None:
-        return None
-    if isinstance(value, bytes):
-        return value.decode()
-    return str(value)
+    return await redis.get(_key(jti))
 
 
 async def delete_refresh_session(jti: str) -> None:

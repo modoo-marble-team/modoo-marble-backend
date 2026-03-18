@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_HOURS: int = 24
     JWT_ACCESS_EXPIRE_MINUTES: int = 60
+    JWT_REFRESH_EXPIRE_DAYS: int = 14
 
     KAKAO_CLIENT_ID: str = ""
     KAKAO_CLIENT_SECRET: str = ""
@@ -25,6 +26,12 @@ class Settings(BaseSettings):
 
     KAKAO_TOKEN_URL: str = "https://kauth.kakao.com/oauth/token"
     KAKAO_ME_URL: str = "https://kapi.kakao.com/v2/user/me"
+
+    REFRESH_COOKIE_NAME: str = "modoo_refresh_token"
+    REFRESH_COOKIE_SECURE: bool = False
+    REFRESH_COOKIE_SAMESITE: str = "lax"
+    REFRESH_COOKIE_PATH: str = "/api/auth"
+    REFRESH_COOKIE_DOMAIN: str = ""
 
     GEMINI_API_KEY: str = ""
 
@@ -65,10 +72,3 @@ TORTOISE_ORM = {
         },
     },
 }
-JWT_REFRESH_EXPIRE_DAYS: int = 14
-
-REFRESH_COOKIE_NAME: str = "modoo_refresh_token"
-REFRESH_COOKIE_SECURE: bool = False
-REFRESH_COOKIE_SAMESITE: str = "lax"
-REFRESH_COOKIE_PATH: str = "/api/auth"
-REFRESH_COOKIE_DOMAIN: str = ""
