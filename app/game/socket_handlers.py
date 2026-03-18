@@ -66,6 +66,28 @@ def register_game_handlers(
 
         await sio.emit("game:prompt", prompt_payload, room=f"user:{prompt_player_id}")
 
+    async def ensure_game_room_membership(
+        *,
+        sid: str,
+        game_id: str,
+        state: dict,
+        user_id: int,
+    ) -> bool:
+        if str(user_id) not in state.get("players", {}):
+            await sio.emit(
+                "game:error",
+                {
+                    "gameId": game_id,
+                    "code": "NOT_GAME_MEMBER",
+                    "message": "You are not a participant in this game.",
+                },
+                to=sid,
+            )
+            return False
+
+        await sio.enter_room(sid, f"game:{game_id}")
+        return True
+
     def build_error_ack(
         *,
         game_id: str | None,
@@ -353,6 +375,14 @@ def register_game_handlers(
                     )
                     return
 
+                if not await ensure_game_room_membership(
+                    sid=sid,
+                    game_id=str(game_id),
+                    state=state,
+                    user_id=user_id,
+                ):
+                    return
+
                 if action_type == ActionType.ROLL_DICE:
                     events, patches = process_roll_dice(state, user_id)
                     apply_patches(state, patches)
@@ -457,7 +487,7 @@ def register_game_handlers(
         packet = await sync_runtime.build_and_store_patch_packet(
             state=state,
             events=events,
-            patch=patches,
+            patches=patches,
             include_snapshot=False,
         )
 
@@ -553,6 +583,14 @@ def register_game_handlers(
                     )
                     return
 
+                if not await ensure_game_room_membership(
+                    sid=sid,
+                    game_id=str(game_id),
+                    state=state,
+                    user_id=user_id,
+                ):
+                    return
+
                 events, patches = process_prompt_response(
                     state,
                     player_id=user_id,
@@ -607,7 +645,7 @@ def register_game_handlers(
         packet = await sync_runtime.build_and_store_patch_packet(
             state=state,
             events=events,
-            patch=patches,
+            patches=patches,
             include_snapshot=False,
         )
 
