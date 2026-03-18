@@ -112,7 +112,7 @@ async def kakao_callback_get(code: str = Query(..., min_length=1)) -> RedirectRe
     if not settings.FRONTEND_LOGIN_REDIRECT:
         raise HTTPException(status_code=500, detail="FRONTEND_LOGIN_REDIRECT missing")
 
-    refresh_token = await _issue_refresh_token(user_id=int(user.id))
+    refresh_token = await _issue_refresh_token(user_id=user.id)
 
     redirect_url = (
         f"{settings.FRONTEND_LOGIN_REDIRECT}"
@@ -139,13 +139,13 @@ async def kakao_callback_post(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
-    refresh_token = await _issue_refresh_token(user_id=int(user.id))
+    refresh_token = await _issue_refresh_token(user_id=user.id)
     _set_refresh_cookie(response, refresh_token)
 
     return AuthResponse(
         access_token=access_token,
         user=AuthUserResponse(
-            id=int(user.id),
+            id=user.id,
             nickname=user.nickname,
             profile_image_url=user.profile_image_url,
             is_guest=user.is_guest,
@@ -161,13 +161,13 @@ async def guest_login(_: Request, response: Response) -> AuthResponse:
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
 
-    refresh_token = await _issue_refresh_token(user_id=int(user.id))
+    refresh_token = await _issue_refresh_token(user_id=user.id)
     _set_refresh_cookie(response, refresh_token)
 
     return AuthResponse(
         access_token=access_token,
         user=AuthUserResponse(
-            id=int(user.id),
+            id=user.id,
             nickname=user.nickname,
             profile_image_url=user.profile_image_url,
             is_guest=user.is_guest,
@@ -183,7 +183,7 @@ async def get_auth_session(auth: AuthUser = Depends(get_auth_user)) -> dict:
         raise HTTPException(status_code=404, detail="User not found")
 
     return {
-        "id": int(user.id),
+        "id": user.id,
         "nickname": user.nickname,
         "profile_image_url": user.profile_image_url,
         "is_guest": user.is_guest,
@@ -226,7 +226,7 @@ async def refresh_access_token(
     except (TypeError, ValueError):
         _raise_invalid_refresh(response)
 
-    stored_user_id = await get_and_delete_refresh_session(str(jti))
+    stored_user_id = await get_and_delete_refresh_session(jti)
     if stored_user_id is None or stored_user_id != str(user_id):
         _raise_invalid_refresh(response)
 
@@ -238,10 +238,10 @@ async def refresh_access_token(
         secret=settings.JWT_SECRET,
         algorithm=settings.JWT_ALGORITHM,
         exp_minutes=settings.JWT_ACCESS_EXPIRE_MINUTES,
-        user_id=int(user.id),
+        user_id=user.id,
         is_guest=user.is_guest,
     )
-    new_refresh_token = await _issue_refresh_token(user_id=int(user.id))
+    new_refresh_token = await _issue_refresh_token(user_id=user.id)
     _set_refresh_cookie(response, new_refresh_token)
 
     return RefreshResponse(
@@ -266,7 +266,7 @@ async def logout(
             )
             jti = payload.get("jti")
             if jti:
-                await delete_refresh_session(str(jti))
+                await delete_refresh_session(jti)
         except (ExpiredSignatureError, InvalidTokenError):
             pass
         except Exception as e:
