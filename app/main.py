@@ -10,33 +10,48 @@ from starlette.middleware.cors import CORSMiddleware
 from tortoise import Tortoise
 
 from app.config import TORTOISE_ORM, settings
+from app.dm.socket_handlers import register_dm_handlers
+from app.errors import register_error_handlers
+from app.game.reconnect import mark_disconnected
+from app.game.socket_handlers import register_game_handlers
+from app.game.sync_runtime import (
+    handle_game_socket_connect,
+    handle_game_socket_disconnect,
+    start_game_sync_scheduler,
+    stop_game_sync_scheduler,
+)
+from app.lobby.socket_handlers import register_lobby_handlers
 from app.models.user import User
-from app.presence import list_online, set_offline, set_online
-from app.redis_client import close_redis, init_redis
-from app.routers import auth, users
+from app.presence import set_offline, set_online
+from app.redis_client import close_redis, get_redis, init_redis
+from app.routers import auth, game, lobby, users
 from app.utils.jwt import decode_token
 
-# 로깅 라이브러리
-# 서버에서 무슨 일이 일어나고 있는지 기록하는 로깅 도구
-# 이후 logger.info("✅ DB/Redis 연결 완료") 이렇게 쓸 수 있다.
 logger = structlog.get_logger()
 
-# Socket.IO 서버 생성
-# AsyncServer 비동기 방식으로 소켓 서버 생성
 sio = socketio.AsyncServer(
-    async_mode="asgi",  # FastAPI가 ASGI 방식이라 맞춘 것
-    cors_allowed_origins=settings.CORS_ORIGINS,  # 허용하는 요청 주소를 정해놓는다
+    async_mode="asgi",
+    cors_allowed_origins=settings.CORS_ORIGINS,
 )
 
 _sid_to_user: dict[str, int] = {}
 
+register_game_handlers(sio, _sid_to_user)
+register_lobby_handlers(sio, _sid_to_user)
+register_dm_handlers(sio, _sid_to_user)
 
-async def _broadcast_online_users() -> None:
-    users_list = await list_online()
-    await sio.emit("online_users", {"users": users_list})
+
+async def _broadcast_user_status(user_id: int, nickname: str, status: str) -> None:
+    await sio.emit(
+        "user_status_changed",
+        {
+            "id": user_id,
+            "nickname": nickname,
+            "status": status,
+        },
+    )
 
 
-# Socket 인증 + Presence
 @sio.event
 async def connect(sid: str, environ: dict, auth_data: dict | None):
     try:
@@ -53,16 +68,21 @@ async def connect(sid: str, environ: dict, auth_data: dict | None):
         if not sub:
             raise ConnectionRefusedError("Invalid payload")
 
-        user_id = int(sub)
+        try:
+            user_id = int(sub)
+        except (TypeError, ValueError) as e:
+            raise ConnectionRefusedError("Invalid user id") from e
+
         user = await User.get_or_none(id=user_id, deleted_at__isnull=True)
         if not user:
             raise ConnectionRefusedError("User not found or deleted")
 
         _sid_to_user[sid] = int(user.id)
-        await set_online(user_id=str(user.id), nickname=user.nickname, status="online")
+        await handle_game_socket_connect(sid=sid, user_id=int(user.id))
 
+        await set_online(user_id=str(user.id), nickname=user.nickname, status="lobby")
         await sio.enter_room(sid, f"user:{user.id}")
-        await _broadcast_online_users()
+        await _broadcast_user_status(int(user.id), user.nickname, "lobby")
         return True
     except ConnectionRefusedError as e:
         raise e
@@ -72,43 +92,115 @@ async def connect(sid: str, environ: dict, auth_data: dict | None):
 
 @sio.event
 async def disconnect(sid: str):
+    user_id = _sid_to_user.get(sid)
+
     try:
-        user_id = _sid_to_user.pop(sid, None)
         if user_id is not None:
+            user = await User.get_or_none(id=int(user_id), deleted_at__isnull=True)
+            nickname = user.nickname if user else ""
+
+            await handle_game_socket_disconnect(sid=sid, user_id=int(user_id))
+            await _handle_game_disconnect(int(user_id))
+            await _handle_room_disconnect(int(user_id))
             await set_offline(user_id=str(user_id))
-            await _broadcast_online_users()
+            await _broadcast_user_status(int(user_id), nickname, "offline")
+    except Exception:
+        pass
+    finally:
+        _sid_to_user.pop(sid, None)
+
+
+async def _handle_game_disconnect(user_id: int) -> None:
+    try:
+        redis = get_redis()
+        game_id = await redis.get(f"user:{user_id}:game")
+        if game_id is None:
+            return
+
+        await mark_disconnected(
+            game_id=game_id,
+            user_id=user_id,
+            sio=sio,
+            sid_to_user=_sid_to_user,
+        )
     except Exception:
         pass
 
 
-# 서버 시작/종료 시 실행할 작업
+async def _handle_room_disconnect(user_id: int) -> None:
+    """소켓 끊김 시 대기방 멤버십 정리."""
+    from app.services.room_service import RoomService
+
+    room_service = RoomService()
+    try:
+        room_id = await room_service._get_user_room_id(user_id)
+        if room_id is None:
+            return
+
+        room, new_host_id = await room_service.leave_room(
+            room_id=room_id, user_id=user_id
+        )
+
+        if room is None:
+            await sio.emit(
+                "lobby_updated", {"action": "removed", "room": {"id": room_id}}
+            )
+        else:
+            await sio.emit(
+                "lobby_updated",
+                {"action": "updated", "room": room_service.room_card(room)},
+            )
+            await sio.emit(
+                "room_updated",
+                room_service.room_snapshot(room),
+                room=f"room:{room_id}",
+            )
+            if new_host_id:
+                new_host = next(
+                    (p for p in room["players"] if p["id"] == new_host_id), None
+                )
+                if new_host:
+                    await sio.emit(
+                        "host_changed",
+                        {
+                            "new_host_id": new_host_id,
+                            "new_host_nickname": new_host["nickname"],
+                        },
+                        room=f"room:{room_id}",
+                    )
+    except Exception:
+        logger.warning("room disconnect 처리 실패", user_id=user_id)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 시작 시
-    await Tortoise.init(config=TORTOISE_ORM)  # DB 연결
+    await Tortoise.init(config=TORTOISE_ORM)
     if settings.APP_ENV == "development":
-        await Tortoise.generate_schemas()  # 개발 환경에서만 테이블 자동 생성
-    await init_redis()  # Redis 연결
+        await Tortoise.generate_schemas()
+
+    await init_redis()
+    await start_game_sync_scheduler()
     logger.info("✅ DB/Redis 연결이 완료되었습니다.")
 
-    yield  # 연결 유지(서버 실행 중)
-    # 서버가 살아있고 DB랑 Redis 연결이 유지되도록 도와줌
+    yield
 
-    # 종료 시 (연결 정리)
+    await stop_game_sync_scheduler()
     await auth.http_client.aclose()
     await close_redis()
     await Tortoise.close_connections()
     logger.info("☠️️☠️️☠️️ DB/Redis 연결이 끊겼습니다.️")
 
 
-# FastAPI 앱 생성
 app = FastAPI(
-    title="모두의마블 API",  # Swagger에 표시될 API 이름
-    version="0.1.0",  # API 버전
-    docs_url="/docs",  # Swagger UI 주소 (API Test 가능)
-    redoc_url="/redoc",  # ReDoc 주소 (읽기 전용)
-    lifespan=lifespan,  # 시작/종료 함수 등록
+    title="모두의마블 API",
+    version="0.1.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    lifespan=lifespan,
 )
+app.state.sio = sio
+app.state.sid_to_user = _sid_to_user
+register_error_handlers(app)
 
 
 def custom_openapi():
@@ -128,23 +220,10 @@ def custom_openapi():
         "bearerFormat": "JWT",
     }
 
-    protected_prefixes = (
-        "/v1/users",
-        "/v1/rooms",
-        "/v1/games",
-    )
-
-    http_methods = {"get", "post", "put", "patch", "delete", "options", "head"}
-
-    for path, path_item in schema.get("paths", {}).items():
-        for method, operation in path_item.items():
-            if method not in http_methods or not isinstance(operation, dict):
-                continue
-
-            if path.startswith(protected_prefixes):
-                operation["security"] = [{"BearerAuth": []}]
-            else:
-                operation.pop("security", None)
+    for path_item in schema.get("paths", {}).values():
+        for operation in path_item.values():
+            if isinstance(operation, dict):
+                operation.setdefault("security", [{"BearerAuth": []}])
 
     app.openapi_schema = schema
     return app.openapi_schema
@@ -152,21 +231,20 @@ def custom_openapi():
 
 app.openapi = custom_openapi
 
-# CORS 설정
-# 허용된 주소의 요청인지 확인하기 위해
-app.add_middleware(  # app에 미들웨어 추가 (FastAPI 내장 메서드)
-    CORSMiddleware,  # 어떤 미들웨어? > CORS 처리용
-    allow_origins=settings.CORS_ORIGINS,  # 허용할 주소 목록 (.env에서 읽어옴)
-    allow_credentials=True,  # 쿠키/인증 헤더 허용 (로그인에 필요)
-    allow_methods=["*"],  # GET, POST, PATCH, DELETE 등 모든 메서드 허용
-    allow_headers=["*"],  # 모든 헤더 허용
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-app.include_router(auth.router, prefix="/v1/auth", tags=["Auth"])
-app.include_router(users.router, prefix="/v1", tags=["Users"])
+app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
+app.include_router(users.router, prefix="/api", tags=["Users"])
+app.include_router(lobby.router, prefix="/api", tags=["Lobby"])
+app.include_router(game.router, prefix="/api", tags=["Game"])
 
 
-# 헬스체크
 @app.get("/health", tags=["System"])
 async def health_check():
     return {"status": "ok", "title": app.title, "version": app.version}
@@ -177,8 +255,5 @@ async def api_health_check():
     return {"status": "ok", "title": app.title, "version": app.version}
 
 
-# Socket.IO 마운트
-socket_app = socketio.ASGIApp(
-    sio, app
-)  # 둘을 하나로 합침. uvicorn이 하나의 앱만 실행할 수 있기 때문
-application = socket_app  # 최종적으로 application이라는 변수에 담음. 이후 docker에서 application이라는 이름으로 실행 명령어를 내릴 것.
+socket_app = socketio.ASGIApp(sio, app)
+application = socket_app
