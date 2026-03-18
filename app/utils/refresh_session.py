@@ -19,6 +19,11 @@ async def get_refresh_session(jti: str) -> str | None:
     return await redis.get(_key(jti))
 
 
+async def get_and_delete_refresh_session(jti: str) -> str | None:
+    redis = await get_redis()
+    return await redis.getdel(_key(jti))
+
+
 async def delete_refresh_session(jti: str) -> None:
     redis = await get_redis()
     await redis.delete(_key(jti))

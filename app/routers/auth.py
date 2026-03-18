@@ -23,7 +23,7 @@ from app.utils.auth_dep import AuthUser, get_auth_user
 from app.utils.jwt import create_access_token, create_refresh_token, decode_token
 from app.utils.refresh_session import (
     delete_refresh_session,
-    get_refresh_session,
+    get_and_delete_refresh_session,
     save_refresh_session,
 )
 
@@ -223,20 +223,16 @@ async def refresh_access_token(
 
     try:
         user_id = int(sub)
-    except (TypeError, ValueError) as e:
-        _clear_refresh_cookie(response)
-        raise HTTPException(status_code=401, detail="Invalid refresh token") from e
+    except (TypeError, ValueError):
+        _raise_invalid_refresh(response)
 
-    stored_user_id = await get_refresh_session(str(jti))
+    stored_user_id = await get_and_delete_refresh_session(str(jti))
     if stored_user_id is None or stored_user_id != str(user_id):
         _raise_invalid_refresh(response)
 
     user = await User.get_or_none(id=user_id, deleted_at__isnull=True)
     if not user:
-        await delete_refresh_session(str(jti))
         _raise_invalid_refresh(response)
-
-    await delete_refresh_session(str(jti))
 
     access_token = create_access_token(
         secret=settings.JWT_SECRET,
