@@ -26,7 +26,9 @@ async def get_auth_user(authorization: str | None = Header(default=None)) -> Aut
     token = parts[1]
     try:
         payload = decode_token(
-            secret=settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM, token=token
+            secret=settings.JWT_SECRET,
+            algorithm=settings.JWT_ALGORITHM,
+            token=token,
         )
     except ExpiredSignatureError as e:
         raise HTTPException(status_code=401, detail="Token expired") from e
@@ -35,13 +37,16 @@ async def get_auth_user(authorization: str | None = Header(default=None)) -> Aut
     except Exception as e:
         raise HTTPException(status_code=401, detail="Invalid token") from e
 
+    if payload.get("type") != "access":
+        raise HTTPException(status_code=401, detail="Invalid token")
+
     sub = payload.get("sub")
     if not sub:
         raise HTTPException(status_code=401, detail="Invalid token payload")
 
     try:
         user_id = int(sub)
-    except Exception as e:
+    except (TypeError, ValueError) as e:
         raise HTTPException(status_code=401, detail="Invalid token payload") from e
 
     is_guest = bool(payload.get("is_guest", False))

@@ -18,3 +18,13 @@ class AuthResponse(BaseModel):
     access_token: str
     user: AuthUserResponse
     is_new_user: bool
+
+
+class RefreshResponse(BaseModel):
+    access_token: str
+    token_type: str = "Bearer"
+    expires_in: int
+
+
+class LogoutResponse(BaseModel):
+    success: bool
