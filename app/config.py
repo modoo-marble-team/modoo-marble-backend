@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_HOURS: int = 24
     JWT_ACCESS_EXPIRE_MINUTES: int = 60
+    JWT_REFRESH_EXPIRE_DAYS: int = 14
 
     KAKAO_CLIENT_ID: str = ""
     KAKAO_CLIENT_SECRET: str = ""
@@ -26,28 +27,20 @@ class Settings(BaseSettings):
     KAKAO_TOKEN_URL: str = "https://kauth.kakao.com/oauth/token"
     KAKAO_ME_URL: str = "https://kapi.kakao.com/v2/user/me"
 
+    REFRESH_COOKIE_NAME: str = "modoo_refresh_token"
+    REFRESH_COOKIE_SECURE: bool = False
+    REFRESH_COOKIE_SAMESITE: str = "lax"
+    REFRESH_COOKIE_PATH: str = "/v1/auth"
+    REFRESH_COOKIE_DOMAIN: str = ""
+
     GEMINI_API_KEY: str = ""
 
     APP_ENV: str = "development"
     DEBUG: bool = True
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:5173"]
 
-    GAME_SYNC_DISCONNECT_GRACE_SECONDS: int = 30
-    GAME_SYNC_TIMER_CLAIM_TTL_SECONDS: int = 3
-    GAME_SYNC_DISCONNECT_SCHEDULE_SHARDS: int = 16
-    GAME_SYNC_WORKER_POLL_INTERVAL_SECONDS: int = 1
-    GAME_SYNC_WORKER_BATCH_SIZE: int = 100
-    GAME_SYNC_WORKER_CONCURRENCY: int = 20
-    GAME_SYNC_WORKER_COUNT: int = 10
-    GAME_SYNC_LEADER_TTL_SECONDS: int = 5
-    GAME_SYNC_PATCH_KEEP_COUNT: int = 200
-
 
 settings = Settings()
-
-if not settings.JWT_SECRET:
-    raise ValueError("JWT_SECRET is required")
-
 
 TORTOISE_ORM = {
     "connections": {
