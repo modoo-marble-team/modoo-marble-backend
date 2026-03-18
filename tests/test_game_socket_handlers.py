@@ -135,7 +135,9 @@ async def test_game_action_joins_game_room_before_broadcast(monkeypatch):
     runtime = FakeRuntime()
     state = make_state()
 
-    monkeypatch.setattr("app.game.socket_handlers.init_game_sync_runtime", lambda _sio: runtime)
+    monkeypatch.setattr(
+        "app.game.socket_handlers.init_game_sync_runtime", lambda _sio: runtime
+    )
 
     @asynccontextmanager
     async def fake_game_lock(_game_id: str):
@@ -155,12 +157,16 @@ async def test_game_action_joins_game_room_before_broadcast(monkeypatch):
 
     monkeypatch.setattr("app.game.socket_handlers.game_lock", fake_game_lock)
     monkeypatch.setattr("app.game.socket_handlers.get_game_state", fake_get_game_state)
-    monkeypatch.setattr("app.game.socket_handlers.save_game_state", fake_save_game_state)
+    monkeypatch.setattr(
+        "app.game.socket_handlers.save_game_state", fake_save_game_state
+    )
     monkeypatch.setattr(
         "app.game.socket_handlers.process_roll_dice",
         fake_process_roll_dice,
     )
-    monkeypatch.setattr("app.game.socket_handlers.start_turn_timer", lambda *_args: None)
+    monkeypatch.setattr(
+        "app.game.socket_handlers.start_turn_timer", lambda *_args: None
+    )
 
     register_game_handlers(sio, {"sid-1": 1})
     handler = sio.handlers["game:action"]
@@ -180,6 +186,5 @@ async def test_game_action_joins_game_room_before_broadcast(monkeypatch):
         for item in sio.emitted
     )
     assert any(
-        item["event"] == "game:ack" and item["to"] == "sid-1"
-        for item in sio.emitted
+        item["event"] == "game:ack" and item["to"] == "sid-1" for item in sio.emitted
     )
