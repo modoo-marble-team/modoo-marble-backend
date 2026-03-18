@@ -515,7 +515,7 @@ def register_game_handlers(
         if user_id is None:
             await sio.emit(
                 "game:error",
-                {"code": "AUTH_REQUIRED", "message": "Authentication required."},
+                {"code": "AUTH_REQUIRED", "message": "로그인이 필요합니다."},
                 to=sid,
             )
             return
