@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-from app.game.models import GameState, PlayerGameState
 from app.game.enums import PlayerState
+from app.game.models import GameState, PlayerGameState
 from app.routers import lobby
 
 
@@ -77,7 +77,9 @@ def test_start_room_game_accepts_object_game_state(monkeypatch):
         assert user_id == 1
         return room, game_state
 
-    async def fake_emit_lobby_updated(_request, action: str, payload_room: dict) -> None:
+    async def fake_emit_lobby_updated(
+        _request, action: str, payload_room: dict
+    ) -> None:
         assert action == "status_changed"
         assert payload_room is room
 
