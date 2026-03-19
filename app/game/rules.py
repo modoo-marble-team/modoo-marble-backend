@@ -36,8 +36,6 @@ CHANCE_EFFECTS: dict[int, tuple[str, int]] = {
     27: ("GAIN_MONEY", 500),
 }
 
-EVENT_EFFECT_AMOUNT = 200
-
 CHANCE_CARD_POOL: list[dict] = [
     {
         "type": "GAIN_MONEY",
@@ -194,9 +192,8 @@ def _apply_money_delta(
 
 def _get_toll_amount(tile_id: int, building_level: int) -> int:
     tile_def = TILE_MAP[tile_id]
-    if building_level <= 0:
-        return tile_def.price
-    return tile_def.tolls[min(building_level, len(tile_def.tolls) - 1)]
+    normalized_level = max(0, min(building_level, len(tile_def.tolls) - 1))
+    return tile_def.tolls[normalized_level]
 
 
 def _get_sell_refund(tile_id: int, building_level: int) -> int:
@@ -436,6 +433,25 @@ def _append_landed_event(events: list[dict], *, player_id: int, tile_id: int) ->
             },
         }
     )
+
+
+def _queue_follow_up_landing_prompt(
+    state: GameState,
+    *,
+    player_id: int,
+    tile_id: int,
+    patches: list[dict],
+    events: list[dict],
+) -> None:
+    preview_state = state.clone()
+    apply_patches(preview_state, patches)
+    follow_up_events, follow_up_patches = resolve_landing(
+        preview_state,
+        player_id,
+        tile_id,
+    )
+    events.extend(follow_up_events)
+    patches.extend(follow_up_patches)
 
 
 def _apply_purchase(
@@ -931,6 +947,13 @@ def process_prompt_response(
         )
         events.extend(action_events)
         patches.extend(action_patches)
+        _queue_follow_up_landing_prompt(
+            state,
+            player_id=player_id,
+            tile_id=tile_id,
+            patches=patches,
+            events=events,
+        )
     elif prompt.type == "BUILD_OR_SKIP" and normalized_choice == "BUILD":
         action_events, action_patches = _apply_build(
             state,
