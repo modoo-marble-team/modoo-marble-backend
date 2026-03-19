@@ -300,7 +300,9 @@ def test_last_player_standing_triggers_game_over():
     events, patches = process_end_turn(state, 1)
     apply_patches(state, patches)
 
-    game_over_events = [event for event in events if event["type"] == ServerEventType.GAME_OVER]
+    game_over_events = [
+        event for event in events if event["type"] == ServerEventType.GAME_OVER
+    ]
     assert len(game_over_events) == 1
     assert game_over_events[0]["reason"] == "last_player_standing"
     assert state.status == "finished"
@@ -314,7 +316,9 @@ def test_max_rounds_triggers_game_over_exactly_once():
     events, patches = process_end_turn(state, 2)
     apply_patches(state, patches)
 
-    game_over_events = [event for event in events if event["type"] == ServerEventType.GAME_OVER]
+    game_over_events = [
+        event for event in events if event["type"] == ServerEventType.GAME_OVER
+    ]
     assert len(game_over_events) == 1
     assert game_over_events[0]["reason"] == "max_rounds"
     assert state.status == "finished"

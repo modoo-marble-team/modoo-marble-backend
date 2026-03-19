@@ -5,7 +5,13 @@ from contextlib import asynccontextmanager
 import pytest
 
 from app.game.enums import PlayerState
-from app.game.models import GameState, PendingPrompt, PlayerGameState, PromptChoice, TileGameState
+from app.game.models import (
+    GameState,
+    PendingPrompt,
+    PlayerGameState,
+    PromptChoice,
+    TileGameState,
+)
 from app.game.socket_handlers import register_game_handlers
 from app.game.sync_runtime import GameSyncRuntime
 
@@ -166,9 +172,15 @@ async def test_game_action_joins_game_room_before_broadcast(monkeypatch):
 
     monkeypatch.setattr("app.game.socket_handlers.game_lock", fake_game_lock)
     monkeypatch.setattr("app.game.socket_handlers.get_game_state", fake_get_game_state)
-    monkeypatch.setattr("app.game.socket_handlers.save_game_state", fake_save_game_state)
-    monkeypatch.setattr("app.game.socket_handlers.process_roll_dice", fake_process_roll_dice)
-    monkeypatch.setattr("app.game.socket_handlers.start_turn_timer", lambda *_args: None)
+    monkeypatch.setattr(
+        "app.game.socket_handlers.save_game_state", fake_save_game_state
+    )
+    monkeypatch.setattr(
+        "app.game.socket_handlers.process_roll_dice", fake_process_roll_dice
+    )
+    monkeypatch.setattr(
+        "app.game.socket_handlers.start_turn_timer", lambda *_args: None
+    )
 
     register_game_handlers(sio, {"sid-1": 1})
     handler = sio.handlers["game:action"]
@@ -184,8 +196,7 @@ async def test_game_action_joins_game_room_before_broadcast(monkeypatch):
         for item in sio.emitted
     )
     assert any(
-        item["event"] == "game:ack" and item["to"] == "sid-1"
-        for item in sio.emitted
+        item["event"] == "game:ack" and item["to"] == "sid-1" for item in sio.emitted
     )
 
 
@@ -270,8 +281,12 @@ async def test_legacy_travel_action_uses_pending_travel_prompt(monkeypatch):
     )
     monkeypatch.setattr("app.game.socket_handlers.game_lock", fake_game_lock)
     monkeypatch.setattr("app.game.socket_handlers.get_game_state", fake_get_game_state)
-    monkeypatch.setattr("app.game.socket_handlers.save_game_state", fake_save_game_state)
-    monkeypatch.setattr("app.game.socket_handlers.start_turn_timer", lambda *_args: None)
+    monkeypatch.setattr(
+        "app.game.socket_handlers.save_game_state", fake_save_game_state
+    )
+    monkeypatch.setattr(
+        "app.game.socket_handlers.start_turn_timer", lambda *_args: None
+    )
 
     register_game_handlers(sio, {"sid-1": 1})
     handler = sio.handlers["game:action"]

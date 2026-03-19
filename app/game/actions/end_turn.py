@@ -37,7 +37,9 @@ def process_end_turn(
     if state.current_player_id != player_id:
         raise GameActionError(code="NOT_YOUR_TURN", message="내 턴이 아닙니다.")
     if state.status != "playing":
-        raise GameActionError(code="INVALID_PHASE", message="진행 중인 게임이 아닙니다.")
+        raise GameActionError(
+            code="INVALID_PHASE", message="진행 중인 게임이 아닙니다."
+        )
     if state.phase == PHASE_WAIT_PROMPT:
         raise GameActionError(
             code="INVALID_PHASE",

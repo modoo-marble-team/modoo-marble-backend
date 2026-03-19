@@ -582,7 +582,10 @@ class GameSyncRuntime:
             await self.clear_disconnected_at(game_id=game_id, player_id=player_id)
             return
 
-        if self._now_ts() - disconnected_at < settings.GAME_SYNC_DISCONNECT_GRACE_SECONDS:
+        if (
+            self._now_ts() - disconnected_at
+            < settings.GAME_SYNC_DISCONNECT_GRACE_SECONDS
+        ):
             return
 
         async with game_lock(game_id):
@@ -594,7 +597,10 @@ class GameSyncRuntime:
                 await self.clear_disconnected_at(game_id=game_id, player_id=player_id)
                 return
 
-            if self._now_ts() - disconnected_at < settings.GAME_SYNC_DISCONNECT_GRACE_SECONDS:
+            if (
+                self._now_ts() - disconnected_at
+                < settings.GAME_SYNC_DISCONNECT_GRACE_SECONDS
+            ):
                 return
 
             if not await self._try_claim_timer(game_id=game_id, player_id=player_id):
@@ -603,12 +609,16 @@ class GameSyncRuntime:
             try:
                 state = await get_game_state(game_id)
                 if state is None or state.status != "playing":
-                    await self.clear_disconnected_at(game_id=game_id, player_id=player_id)
+                    await self.clear_disconnected_at(
+                        game_id=game_id, player_id=player_id
+                    )
                     return
 
                 player = state.player(player_id)
                 if player is None or player.player_state == PlayerState.BANKRUPT:
-                    await self.clear_disconnected_at(game_id=game_id, player_id=player_id)
+                    await self.clear_disconnected_at(
+                        game_id=game_id, player_id=player_id
+                    )
                     return
 
                 events: list[dict[str, Any]] = []

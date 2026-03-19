@@ -76,7 +76,7 @@ BOARD: list[TileDefinition] = [
     _prop(23, "원주", 4),
     _special(24, "섬으로 이동", TileType.MOVE_TO_ISLAND),
     _prop(25, "청주", 5),
-    _prop(26, "천안", 5), 
+    _prop(26, "천안", 5),
     _special(27, "찬스", TileType.CHANCE),
     _prop(28, "대전", 5),
     _prop(29, "인천", 5),

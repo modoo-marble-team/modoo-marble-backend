@@ -38,9 +38,21 @@ CHANCE_EFFECTS: dict[int, tuple[str, int]] = {
 EVENT_EFFECT_AMOUNT = 200
 
 CHANCE_CARD_POOL: list[dict] = [
-    {"type": "GAIN_MONEY", "amount": 300, "description": "보너스 300만원을 획득합니다."},
-    {"type": "GAIN_MONEY", "amount": 200, "description": "보너스 200만원을 획득합니다."},
-    {"type": "GAIN_MONEY", "amount": 500, "description": "보너스 500만원을 획득합니다."},
+    {
+        "type": "GAIN_MONEY",
+        "amount": 300,
+        "description": "보너스 300만원을 획득합니다.",
+    },
+    {
+        "type": "GAIN_MONEY",
+        "amount": 200,
+        "description": "보너스 200만원을 획득합니다.",
+    },
+    {
+        "type": "GAIN_MONEY",
+        "amount": 500,
+        "description": "보너스 500만원을 획득합니다.",
+    },
     {"type": "LOSE_MONEY", "amount": 150, "description": "150만원을 지불합니다."},
     {"type": "LOSE_MONEY", "amount": 200, "description": "200만원을 지불합니다."},
     {"type": "LOSE_MONEY", "amount": 300, "description": "300만원을 지불합니다."},
@@ -48,7 +60,11 @@ CHANCE_CARD_POOL: list[dict] = [
     {"type": "MOVE_FORWARD", "amount": 5, "description": "앞으로 5칸 이동합니다."},
     {"type": "MOVE_BACKWARD", "amount": 2, "description": "뒤로 2칸 이동합니다."},
     {"type": "MOVE_BACKWARD", "amount": 3, "description": "뒤로 3칸 이동합니다."},
-    {"type": "STEAL_PROPERTY", "amount": 0, "description": "상대의 땅 하나를 가져옵니다."},
+    {
+        "type": "STEAL_PROPERTY",
+        "amount": 0,
+        "description": "상대의 땅 하나를 가져옵니다.",
+    },
     {"type": "GIVE_PROPERTY", "amount": 0, "description": "내 땅 하나를 넘겨줍니다."},
 ]
 
@@ -311,7 +327,9 @@ def _apply_chance_card(
                         op_set(f"tiles.{given_tile_id}.owner_id", receiver_id),
                         op_set(f"tiles.{given_tile_id}.building_level", 0),
                         op_remove(f"players.{player_id}.owned_tiles", given_tile_id),
-                        op_remove(f"players.{player_id}.building_levels", given_tile_id),
+                        op_remove(
+                            f"players.{player_id}.building_levels", given_tile_id
+                        ),
                         op_push(f"players.{receiver_id}.owned_tiles", given_tile_id),
                         op_set(
                             f"players.{receiver_id}.building_levels.{given_tile_id}",
@@ -359,15 +377,23 @@ def _apply_purchase(
 ) -> tuple[list[dict], list[dict]]:
     tile_def = TILE_MAP.get(tile_id)
     tile_state = state.tile(tile_id)
-    if tile_def is None or tile_state is None or tile_def.tile_type != TileType.PROPERTY:
+    if (
+        tile_def is None
+        or tile_state is None
+        or tile_def.tile_type != TileType.PROPERTY
+    ):
         raise GameActionError(code="INVALID_TILE", message="구매할 수 없는 칸입니다.")
 
     if tile_state.owner_id is not None:
-        raise GameActionError(code="INVALID_PHASE", message="이미 소유자가 있는 칸입니다.")
+        raise GameActionError(
+            code="INVALID_PHASE", message="이미 소유자가 있는 칸입니다."
+        )
 
     player = state.require_player(player_id)
     if player.balance < tile_def.price:
-        raise GameActionError(code="INSUFFICIENT_FUNDS", message="보유 금액이 부족합니다.")
+        raise GameActionError(
+            code="INSUFFICIENT_FUNDS", message="보유 금액이 부족합니다."
+        )
 
     patches = [
         op_inc(f"players.{player_id}.balance", -tile_def.price),
@@ -394,7 +420,11 @@ def _apply_build(
 ) -> tuple[list[dict], list[dict]]:
     tile_def = TILE_MAP.get(tile_id)
     tile_state = state.tile(tile_id)
-    if tile_def is None or tile_state is None or tile_def.tile_type != TileType.PROPERTY:
+    if (
+        tile_def is None
+        or tile_state is None
+        or tile_def.tile_type != TileType.PROPERTY
+    ):
         raise GameActionError(code="INVALID_TILE", message="건설할 수 없는 칸입니다.")
 
     if tile_state.owner_id != player_id:
@@ -410,7 +440,9 @@ def _apply_build(
     build_cost = tile_def.build_costs[current_level + 1]
     player = state.require_player(player_id)
     if player.balance < build_cost:
-        raise GameActionError(code="INSUFFICIENT_FUNDS", message="보유 금액이 부족합니다.")
+        raise GameActionError(
+            code="INSUFFICIENT_FUNDS", message="보유 금액이 부족합니다."
+        )
 
     next_level = current_level + 1
     return [
@@ -436,7 +468,11 @@ def _apply_toll_payment(
 ) -> tuple[list[dict], list[dict]]:
     tile_def = TILE_MAP.get(tile_id)
     tile_state = state.tile(tile_id)
-    if tile_def is None or tile_state is None or tile_def.tile_type != TileType.PROPERTY:
+    if (
+        tile_def is None
+        or tile_state is None
+        or tile_def.tile_type != TileType.PROPERTY
+    ):
         raise GameActionError(
             code="INVALID_TILE",
             message="통행료를 지불할 수 없는 칸입니다.",
@@ -492,7 +528,9 @@ def process_buy_property_action(
 
     tile_state = state.tile(tile_id)
     if tile_state is None:
-        raise GameActionError(code="INVALID_TILE", message="이 칸에서는 해당 행동을 할 수 없습니다.")
+        raise GameActionError(
+            code="INVALID_TILE", message="이 칸에서는 해당 행동을 할 수 없습니다."
+        )
 
     if tile_state.owner_id is None:
         return _apply_purchase(state, player_id=player_id, tile_id=tile_id)
@@ -514,11 +552,17 @@ def process_sell_property_action(
     if state.current_player_id != player_id:
         raise GameActionError(code="NOT_YOUR_TURN", message="내 턴이 아닙니다.")
     if state.status != "playing" or state.phase != PHASE_WAIT_ROLL:
-        raise GameActionError(code="INVALID_PHASE", message="지금은 매각할 수 없습니다.")
+        raise GameActionError(
+            code="INVALID_PHASE", message="지금은 매각할 수 없습니다."
+        )
 
     tile_def = TILE_MAP.get(tile_id)
     tile_state = state.tile(tile_id)
-    if tile_def is None or tile_state is None or tile_def.tile_type != TileType.PROPERTY:
+    if (
+        tile_def is None
+        or tile_state is None
+        or tile_def.tile_type != TileType.PROPERTY
+    ):
         raise GameActionError(code="INVALID_TILE", message="매각할 수 없는 칸입니다.")
 
     if tile_state.owner_id != player_id:
@@ -558,7 +602,9 @@ def process_sell_property_action(
             ]
         )
     else:
-        patches.append(op_set(f"players.{player_id}.building_levels.{tile_id}", next_level))
+        patches.append(
+            op_set(f"players.{player_id}.building_levels.{tile_id}", next_level)
+        )
 
     return events, patches
 

@@ -355,7 +355,11 @@ def register_game_handlers(
                     maybe_end_turn(state, user_id, events, patches)
 
                 elif action_type == ActionType.BUY_PROPERTY:
-                    payload = data.get("payload") if isinstance(data.get("payload"), dict) else {}
+                    payload = (
+                        data.get("payload")
+                        if isinstance(data.get("payload"), dict)
+                        else {}
+                    )
                     tile_id = int(payload.get("tileId", -1))
                     events, patches = process_buy_property_action(
                         state,
@@ -366,7 +370,11 @@ def register_game_handlers(
                     maybe_end_turn(state, user_id, events, patches)
 
                 elif action_type == ActionType.SELL_PROPERTY:
-                    payload = data.get("payload") if isinstance(data.get("payload"), dict) else {}
+                    payload = (
+                        data.get("payload")
+                        if isinstance(data.get("payload"), dict)
+                        else {}
+                    )
                     tile_id = int(payload.get("tileId", -1))
                     raw_building_level = payload.get("buildingLevel")
                     building_level = (
@@ -389,7 +397,11 @@ def register_game_handlers(
                     apply_patches(state, patches)
 
                 elif action_type == "TRAVEL":
-                    payload = data.get("payload") if isinstance(data.get("payload"), dict) else {}
+                    payload = (
+                        data.get("payload")
+                        if isinstance(data.get("payload"), dict)
+                        else {}
+                    )
                     pending_prompt = state.pending_prompt
                     if pending_prompt is None or pending_prompt.type != "TRAVEL_SELECT":
                         raise GameActionError(

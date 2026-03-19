@@ -62,11 +62,15 @@ def process_roll_dice(
 ) -> tuple[list[dict], list[dict]]:
     player = state.player(player_id)
     if player is None:
-        raise GameActionError(code="PLAYER_NOT_FOUND", message="플레이어를 찾을 수 없습니다.")
+        raise GameActionError(
+            code="PLAYER_NOT_FOUND", message="플레이어를 찾을 수 없습니다."
+        )
     if state.current_player_id != player_id:
         raise GameActionError(code="NOT_YOUR_TURN", message="내 턴이 아닙니다.")
     if state.status != "playing":
-        raise GameActionError(code="INVALID_PHASE", message="진행 중인 게임이 아닙니다.")
+        raise GameActionError(
+            code="INVALID_PHASE", message="진행 중인 게임이 아닙니다."
+        )
     if state.phase != PHASE_WAIT_ROLL:
         raise GameActionError(
             code="INVALID_PHASE",
