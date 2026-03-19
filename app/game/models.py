@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import types
+from collections.abc import Mapping
 from dataclasses import MISSING, dataclass, field, fields, is_dataclass
 from enum import Enum
-import types
-from typing import Any, Mapping, TypeVar, get_args, get_origin, get_type_hints
+from typing import Any, TypeVar, get_args, get_origin, get_type_hints
 
 from app.game.enums import PlayerState
 

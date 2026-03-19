@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.game.enums import PlayerState, ServerEventType
+from app.game.enums import ServerEventType
 from app.game.errors import GameActionError
 from app.game.models import GameState
 from app.game.patch import op_set
