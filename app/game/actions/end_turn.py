@@ -4,7 +4,12 @@ from app.game.enums import ServerEventType
 from app.game.errors import GameActionError
 from app.game.models import GameState
 from app.game.patch import op_set
-from app.game.rules import PHASE_GAME_OVER, PHASE_WAIT_PROMPT, PHASE_WAIT_ROLL
+from app.game.rules import (
+    PHASE_GAME_OVER,
+    PHASE_RESOLVING,
+    PHASE_WAIT_PROMPT,
+    PHASE_WAIT_ROLL,
+)
 
 MAX_ROUNDS = 20
 
@@ -44,6 +49,17 @@ def process_end_turn(
         raise GameActionError(
             code="INVALID_PHASE",
             message="대기 중인 프롬프트를 먼저 처리해주세요.",
+        )
+
+    if state.phase == PHASE_WAIT_ROLL:
+        raise GameActionError(
+            code="INVALID_PHASE",
+            message="주사위를 먼저 굴려야 합니다.",
+        )
+    if state.phase != PHASE_RESOLVING:
+        raise GameActionError(
+            code="INVALID_PHASE",
+            message="현재 상태에서는 턴을 종료할 수 없습니다.",
         )
 
     if len(state.active_players()) <= 1:

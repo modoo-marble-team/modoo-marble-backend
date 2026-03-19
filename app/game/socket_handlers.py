@@ -9,9 +9,11 @@ from app.game.enums import ActionType
 from app.game.errors import GameActionError
 from app.game.models import GameState
 from app.game.rules import (
+    process_city_build_action,
     process_buy_property_action,
     process_prompt_response,
     process_sell_property_action,
+    process_turn_sell_property_action,
     serialize_prompt,
 )
 from app.game.state import (
@@ -121,17 +123,16 @@ def register_game_handlers(
             await emit_desync_error(sid=sid, game_id=game_id)
             return None
 
-    def maybe_end_turn(
+    def did_turn_advance(
         state: GameState,
-        user_id: int,
-        events: list[dict],
-        patches: list[dict],
-    ) -> None:
-        if state.pending_prompt is None and state.status == "playing":
-            end_events, end_patches = process_end_turn(state, user_id)
-            apply_patches(state, end_patches)
-            events.extend(end_events)
-            patches.extend(end_patches)
+        *,
+        previous_turn: int,
+        previous_player_id: int,
+    ) -> bool:
+        return (
+            state.turn != previous_turn
+            or state.current_player_id != previous_player_id
+        )
 
     def parse_travel_target(payload: dict) -> int:
         raw_target = payload.get("targetTileId")
@@ -395,10 +396,12 @@ def register_game_handlers(
                 ):
                     return
 
+                previous_turn = state.turn
+                previous_player_id = state.current_player_id
+
                 if action_type == ActionType.ROLL_DICE:
                     events, patches = process_roll_dice(state, user_id)
                     apply_patches(state, patches)
-                    maybe_end_turn(state, user_id, events, patches)
 
                 elif action_type == ActionType.BUY_PROPERTY:
                     payload = (
@@ -413,7 +416,6 @@ def register_game_handlers(
                         tile_id=tile_id,
                     )
                     apply_patches(state, patches)
-                    maybe_end_turn(state, user_id, events, patches)
 
                 elif action_type == ActionType.SELL_PROPERTY:
                     payload = (
@@ -429,14 +431,27 @@ def register_game_handlers(
                         and str(raw_building_level).strip() != ""
                         else None
                     )
-                    events, patches = process_sell_property_action(
+                    events, patches = process_turn_sell_property_action(
                         state,
                         player_id=user_id,
                         tile_id=tile_id,
                         building_level=building_level,
                     )
                     apply_patches(state, patches)
-                    maybe_end_turn(state, user_id, events, patches)
+
+                elif action_type == ActionType.CITY_BUILD:
+                    payload = (
+                        data.get("payload")
+                        if isinstance(data.get("payload"), dict)
+                        else {}
+                    )
+                    tile_id = int(payload.get("tileId", -1))
+                    events, patches = process_city_build_action(
+                        state,
+                        player_id=user_id,
+                        tile_id=tile_id,
+                    )
+                    apply_patches(state, patches)
 
                 elif action_type == ActionType.END_TURN:
                     events, patches = process_end_turn(state, user_id)
@@ -464,7 +479,6 @@ def register_game_handlers(
                         payload={"targetTileId": target_tile_id},
                     )
                     apply_patches(state, patches)
-                    maybe_end_turn(state, user_id, events, patches)
 
                 else:
                     await sio.emit(
@@ -524,7 +538,11 @@ def register_game_handlers(
             include_snapshot=False,
         )
 
-        if state.status == "playing":
+        if state.status == "playing" and did_turn_advance(
+            state,
+            previous_turn=previous_turn,
+            previous_player_id=previous_player_id,
+        ):
             start_turn_timer(game_id, sio)
 
         await sio.emit(
@@ -623,6 +641,9 @@ def register_game_handlers(
                 ):
                     return
 
+                previous_turn = state.turn
+                previous_player_id = state.current_player_id
+
                 events, patches = process_prompt_response(
                     state,
                     player_id=user_id,
@@ -631,7 +652,6 @@ def register_game_handlers(
                     payload=payload,
                 )
                 apply_patches(state, patches)
-                maybe_end_turn(state, user_id, events, patches)
 
                 state.revision += 1
                 await save_game_state(game_id, state)
@@ -678,7 +698,11 @@ def register_game_handlers(
             include_snapshot=False,
         )
 
-        if state.status == "playing":
+        if state.status == "playing" and did_turn_advance(
+            state,
+            previous_turn=previous_turn,
+            previous_player_id=previous_player_id,
+        ):
             start_turn_timer(game_id, sio)
 
         await sio.emit(

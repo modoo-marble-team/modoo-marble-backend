@@ -8,6 +8,7 @@ from app.game.errors import GameActionError
 from app.game.models import GameState, PlayerGameState, TileGameState
 from app.game.presentation import serialize_game_snapshot
 from app.game.rules import (
+    process_city_build_action,
     process_prompt_response,
     process_sell_property_action,
     resolve_landing,
@@ -427,6 +428,48 @@ def test_property_acquisition_requires_enough_balance(monkeypatch):
         raise AssertionError("expected insufficient funds error")
 
 
+def test_bankruptcy_during_toll_payment_ends_game_immediately(monkeypatch):
+    state = make_state()
+    tile = TILE_MAP[4]
+    state.tile(4).owner_id = 1
+    state.require_player(1).owned_tiles = [4]
+    state.require_player(1).building_levels = {4: 0}
+    state.current_player_id = 2
+    state.require_player(2).balance = tile.tolls[0] - 10
+    dice_values = iter([2, 2])
+
+    monkeypatch.setattr(
+        "app.game.actions.roll_dice.random.randint",
+        lambda _start, _end: next(dice_values),
+    )
+
+    _events, patches = process_roll_dice(state, 2)
+    apply_patches(state, patches)
+
+    prompt = state.pending_prompt
+    assert prompt is not None
+    assert prompt.type == "PAY_TOLL"
+
+    prompt_events, prompt_patches = process_prompt_response(
+        state,
+        player_id=2,
+        prompt_id=prompt.prompt_id,
+        choice="PAY_TOLL",
+    )
+    apply_patches(state, prompt_patches)
+
+    assert any(event["type"] == "PLAYER_STATE_CHANGED" for event in prompt_events)
+    game_over_events = [
+        event for event in prompt_events if event["type"] == ServerEventType.GAME_OVER
+    ]
+    assert len(game_over_events) == 1
+    assert game_over_events[0]["reason"] == "last_player_standing"
+    assert state.status == "finished"
+    assert state.phase == "GAME_OVER"
+    assert state.winner_id == 1
+    assert state.require_player(2).player_state == PlayerState.BANKRUPT
+
+
 def test_sell_property_action_refunds_money_and_releases_tile():
     state = make_state()
     tile = TILE_MAP[4]
@@ -445,6 +488,28 @@ def test_sell_property_action_refunds_money_and_releases_tile():
     assert state.require_player(1).balance == 5000 + tile.price
     assert state.tile(4).owner_id is None
     assert state.require_player(1).owned_tiles == []
+
+
+def test_city_build_action_upgrades_owned_tile_without_ending_turn():
+    state = make_state()
+    tile = TILE_MAP[4]
+    state.tile(4).owner_id = 1
+    state.require_player(1).owned_tiles = [4]
+    state.require_player(1).building_levels = {4: 0}
+
+    events, patches = process_city_build_action(
+        state,
+        player_id=1,
+        tile_id=4,
+    )
+    apply_patches(state, patches)
+
+    assert any(event["type"] == "BOUGHT_PROPERTY" for event in events)
+    assert state.require_player(1).balance == 5000 - tile.build_costs[1]
+    assert state.tile(4).building_level == 1
+    assert state.require_player(1).building_levels == {4: 1}
+    assert state.current_player_id == 1
+    assert state.phase == "WAIT_ROLL"
 
 
 def test_travel_prompt_moves_to_selected_tile_and_chains_into_tile_prompt():
@@ -525,6 +590,7 @@ def test_bankrupt_player_is_skipped_in_turn_order(monkeypatch):
 def test_last_player_standing_triggers_game_over():
     state = make_state()
     state.require_player(2).player_state = PlayerState.BANKRUPT
+    state.phase = "RESOLVING"
 
     events, patches = process_end_turn(state, 1)
     apply_patches(state, patches)
@@ -541,6 +607,7 @@ def test_max_rounds_triggers_game_over_exactly_once():
     state = make_state()
     state.round = MAX_ROUNDS
     state.current_player_id = 2
+    state.phase = "RESOLVING"
 
     events, patches = process_end_turn(state, 2)
     apply_patches(state, patches)
@@ -555,7 +622,7 @@ def test_max_rounds_triggers_game_over_exactly_once():
 
 def test_consecutive_doubles_reset_after_turn_end(monkeypatch):
     state = make_state()
-    state.require_player(1).consecutive_doubles = 2
+    state.require_player(1).consecutive_doubles = 1
 
     monkeypatch.setattr(
         "app.game.actions.roll_dice.random.randint",
@@ -568,12 +635,33 @@ def test_consecutive_doubles_reset_after_turn_end(monkeypatch):
 
     roll_events, roll_patches = process_roll_dice(state, 1)
     apply_patches(state, roll_patches)
+    if state.pending_prompt is not None:
+        prompt = state.pending_prompt
+        _, prompt_patches = process_prompt_response(
+            state,
+            player_id=1,
+            prompt_id=prompt.prompt_id,
+            choice="SKIP",
+        )
+        apply_patches(state, prompt_patches)
     end_events, end_patches = process_end_turn(state, 1)
     apply_patches(state, end_patches)
 
     assert roll_events[0]["type"] == "DICE_ROLLED"
     assert end_events[0]["type"] == "TURN_ENDED"
     assert state.require_player(1).consecutive_doubles == 0
+
+
+def test_end_turn_requires_roll_completion():
+    state = make_state()
+
+    try:
+        process_end_turn(state, 1)
+    except GameActionError as exc:
+        assert exc.code == "INVALID_PHASE"
+        assert exc.message == "주사위를 먼저 굴려야 합니다."
+    else:
+        raise AssertionError("process_end_turn should fail before rolling")
 
 
 def test_chance_card_gain_money_increases_balance(monkeypatch):

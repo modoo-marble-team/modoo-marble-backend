@@ -149,3 +149,81 @@ async def test_finalize_finished_game_keeps_room_and_clears_game_keys(monkeypatc
         },
     )
     assert sio.emit.await_args_list[1].kwargs == {"room": "room:room-1"}
+
+
+@pytest.mark.asyncio
+async def test_finalize_finished_game_cleans_up_room_when_nobody_connected(monkeypatch):
+    sio = AsyncMock()
+    runtime = GameSyncRuntime(sio)
+    state = make_state()
+
+    deleted_keys: list[str] = []
+
+    class FakeRedis:
+        async def delete(self, *keys: str) -> int:
+            deleted_keys.extend(keys)
+            return len(keys)
+
+    room = {
+        "id": "room-1",
+        "title": "테스트 방",
+        "status": "waiting",
+        "max_players": 4,
+        "is_private": False,
+        "host_user_id": "1",
+        "game_id": None,
+        "players": [
+            {"id": "1", "nickname": "host", "is_host": True, "is_ready": False},
+            {"id": "2", "nickname": "guest", "is_host": False, "is_ready": False},
+        ],
+        "chat_messages": [],
+    }
+
+    finish_game_room = AsyncMock(return_value=room)
+    cleanup_abandoned_room = AsyncMock()
+    clear_active_game = AsyncMock()
+    clear_disconnected_at = AsyncMock()
+    delete_game_state = AsyncMock()
+    update_status = AsyncMock()
+    cancel_turn_timer = Mock()
+
+    monkeypatch.setattr("app.game.sync_runtime.get_redis", lambda: FakeRedis())
+    monkeypatch.setattr(
+        "app.game.sync_runtime.RoomService.finish_game_room",
+        finish_game_room,
+    )
+    monkeypatch.setattr(
+        "app.game.sync_runtime.RoomService.cleanup_abandoned_room",
+        cleanup_abandoned_room,
+    )
+    monkeypatch.setattr(
+        "app.game.sync_runtime.delete_game_state",
+        delete_game_state,
+    )
+    monkeypatch.setattr(
+        "app.game.sync_runtime.cancel_turn_timer",
+        cancel_turn_timer,
+    )
+    monkeypatch.setattr(
+        "app.game.sync_runtime.update_status",
+        update_status,
+    )
+    monkeypatch.setattr(runtime, "clear_active_game", clear_active_game)
+    monkeypatch.setattr(runtime, "clear_disconnected_at", clear_disconnected_at)
+
+    await runtime.finalize_finished_game(state)
+
+    finish_game_room.assert_awaited_once_with(room_id="room-1")
+    cleanup_abandoned_room.assert_awaited_once_with(
+        room_id="room-1",
+        player_ids=[1, 2],
+    )
+    delete_game_state.assert_awaited_once_with("game-1")
+    assert "game:game-1:patchlog" in deleted_keys
+    assert "user:1:game" in deleted_keys
+    assert "user:2:game" in deleted_keys
+    update_status.assert_not_awaited()
+    assert sio.emit.await_args_list[0].args == (
+        "lobby_updated",
+        {"action": "removed", "room": {"id": "room-1"}},
+    )
