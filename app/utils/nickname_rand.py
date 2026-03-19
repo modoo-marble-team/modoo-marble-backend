@@ -124,4 +124,6 @@ def generate_nickname() -> str:
         "지질학자",
         "프로게이머",
     ]
-    return f"#{random.choice(adjectives)}{random.choice(objects)}{random.randint(1, 9999)}"
+    return (
+        f"#{random.choice(adjectives)}{random.choice(objects)}{random.randint(1, 9999)}"
+    )

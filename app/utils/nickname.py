@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import random
-import string
 
 from app.models.user import User
 from app.utils.nickname_rand import generate_nickname
