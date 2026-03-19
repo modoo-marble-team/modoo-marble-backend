@@ -432,3 +432,128 @@ async def test_legacy_travel_action_uses_pending_travel_prompt(monkeypatch):
         item["event"] == "game:prompt" and item["room"] == "user:1"
         for item in sio.emitted
     )
+
+
+@pytest.mark.asyncio
+async def test_sell_property_action_keeps_turn_open(monkeypatch):
+    sio = FakeSio()
+    runtime = FakeRuntime()
+    state = make_state()
+    state.tiles = {4: TileGameState(owner_id=1, building_level=1)}
+    state.require_player(1).owned_tiles = [4]
+    state.require_player(1).building_levels = {4: 1}
+
+    monkeypatch.setattr(
+        "app.game.socket_handlers.init_game_sync_runtime",
+        lambda _sio: runtime,
+    )
+
+    @asynccontextmanager
+    async def fake_game_lock(_game_id: str):
+        yield
+
+    async def fake_get_game_state(_game_id: str) -> GameState:
+        return state
+
+    async def fake_save_game_state(_game_id: str, _state: GameState) -> None:
+        return None
+
+    monkeypatch.setattr("app.game.socket_handlers.game_lock", fake_game_lock)
+    monkeypatch.setattr("app.game.socket_handlers.get_game_state", fake_get_game_state)
+    monkeypatch.setattr(
+        "app.game.socket_handlers.save_game_state", fake_save_game_state
+    )
+    monkeypatch.setattr(
+        "app.game.socket_handlers.start_turn_timer", lambda *_args: None
+    )
+
+    register_game_handlers(sio, {"sid-1": 1})
+    handler = sio.handlers["game:action"]
+
+    await handler(
+        "sid-1",
+        {
+            "gameId": "game-1",
+            "actionId": "sell-1",
+            "type": "SELL_PROPERTY",
+            "payload": {"tileId": 4, "buildingLevel": 1},
+        },
+    )
+
+    assert state.current_player_id == 1
+    assert state.phase == "WAIT_ROLL"
+    assert state.tile(4).owner_id is None
+    assert not any(
+        item["event"] == "game:patch"
+        and any(event["type"] == "TURN_ENDED" for event in item["data"]["events"])
+        for item in sio.emitted
+    )
+    assert any(
+        item["event"] == "game:ack"
+        and item["data"]["ok"] is True
+        and item["data"]["type"] == "SELL_PROPERTY"
+        for item in sio.emitted
+    )
+
+
+@pytest.mark.asyncio
+async def test_city_build_action_upgrades_tile_without_ending_turn(monkeypatch):
+    sio = FakeSio()
+    runtime = FakeRuntime()
+    state = make_state()
+    state.tiles = {4: TileGameState(owner_id=1, building_level=0)}
+    state.require_player(1).owned_tiles = [4]
+    state.require_player(1).building_levels = {4: 0}
+
+    monkeypatch.setattr(
+        "app.game.socket_handlers.init_game_sync_runtime",
+        lambda _sio: runtime,
+    )
+
+    @asynccontextmanager
+    async def fake_game_lock(_game_id: str):
+        yield
+
+    async def fake_get_game_state(_game_id: str) -> GameState:
+        return state
+
+    async def fake_save_game_state(_game_id: str, _state: GameState) -> None:
+        return None
+
+    monkeypatch.setattr("app.game.socket_handlers.game_lock", fake_game_lock)
+    monkeypatch.setattr("app.game.socket_handlers.get_game_state", fake_get_game_state)
+    monkeypatch.setattr(
+        "app.game.socket_handlers.save_game_state", fake_save_game_state
+    )
+    monkeypatch.setattr(
+        "app.game.socket_handlers.start_turn_timer", lambda *_args: None
+    )
+
+    register_game_handlers(sio, {"sid-1": 1})
+    handler = sio.handlers["game:action"]
+
+    await handler(
+        "sid-1",
+        {
+            "gameId": "game-1",
+            "actionId": "build-1",
+            "type": "CITY_BUILD",
+            "payload": {"tileId": 4},
+        },
+    )
+
+    assert state.current_player_id == 1
+    assert state.phase == "WAIT_ROLL"
+    assert state.tile(4).building_level == 1
+    assert state.require_player(1).building_levels == {4: 1}
+    assert not any(
+        item["event"] == "game:patch"
+        and any(event["type"] == "TURN_ENDED" for event in item["data"]["events"])
+        for item in sio.emitted
+    )
+    assert any(
+        item["event"] == "game:ack"
+        and item["data"]["ok"] is True
+        and item["data"]["type"] == "CITY_BUILD"
+        for item in sio.emitted
+    )

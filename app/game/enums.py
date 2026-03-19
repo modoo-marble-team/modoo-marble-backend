@@ -23,6 +23,7 @@ class PlayerState(StrEnum):
 class ActionType(StrEnum):
     ROLL_DICE = "ROLL_DICE"
     BUY_PROPERTY = "BUY_PROPERTY"
+    CITY_BUILD = "CITY_BUILD"
     SELL_PROPERTY = "SELL_PROPERTY"
     END_TURN = "END_TURN"
 

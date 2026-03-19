@@ -827,29 +827,44 @@ class GameSyncRuntime:
     async def finalize_finished_game(self, state: GameState) -> dict | None:
         room_service = RoomService()
         redis = get_redis()
+        player_ids = list(state.players)
+        connected_player_ids = [
+            player_id for player_id in player_ids if player_id in self._user_sids
+        ]
 
         cancel_turn_timer(state.game_id)
         room = await room_service.finish_game_room(room_id=state.room_id)
 
         if room is not None:
-            await self._sio.emit(
-                "lobby_updated",
-                {"action": "status_changed", "room": room_service.room_card(room)},
-            )
-            await self._sio.emit(
-                "room_updated",
-                room_service.room_snapshot(room),
-                room=f"room:{state.room_id}",
-            )
+            if not connected_player_ids:
+                await room_service.cleanup_abandoned_room(
+                    room_id=state.room_id,
+                    player_ids=player_ids,
+                )
+                room = None
+                await self._sio.emit(
+                    "lobby_updated",
+                    {"action": "removed", "room": {"id": state.room_id}},
+                )
+            else:
+                await self._sio.emit(
+                    "lobby_updated",
+                    {"action": "status_changed", "room": room_service.room_card(room)},
+                )
+                await self._sio.emit(
+                    "room_updated",
+                    room_service.room_snapshot(room),
+                    room=f"room:{state.room_id}",
+                )
 
-        for player_id in state.players:
+        for player_id in player_ids:
             await self.clear_active_game(user_id=player_id)
             await redis.delete(self._legacy_user_game_key(player_id))
             await self.clear_disconnected_at(
                 game_id=state.game_id,
                 player_id=player_id,
             )
-            if player_id in self._user_sids:
+            if player_id in connected_player_ids:
                 await update_status(user_id=str(player_id), status="in_room")
 
         await delete_game_state(state.game_id)

@@ -174,6 +174,46 @@ def _bankrupt_player_events(player_id: int) -> list[dict]:
     ]
 
 
+def _append_game_over_if_last_survivor(
+    state: GameState,
+    patches: list[dict],
+    events: list[dict],
+) -> None:
+    preview_state = state.clone()
+    apply_patches(preview_state, patches)
+    active_players = preview_state.active_players()
+
+    if len(active_players) > 1:
+        return
+
+    winner = active_players[0] if active_players else None
+    winner_payload = (
+        None
+        if winner is None
+        else {
+            "playerId": winner.player_id,
+            "nickname": winner.nickname,
+            "balance": winner.balance,
+        }
+    )
+
+    patches.extend(
+        [
+            op_set("status", "finished"),
+            op_set("phase", PHASE_GAME_OVER),
+            op_set("pending_prompt", None),
+            op_set("winner_id", winner.player_id if winner is not None else None),
+        ]
+    )
+    events.append(
+        {
+            "type": ServerEventType.GAME_OVER,
+            "reason": "last_player_standing",
+            "winner": winner_payload,
+        }
+    )
+
+
 def _apply_money_delta(
     state: GameState,
     *,
@@ -185,9 +225,10 @@ def _apply_money_delta(
     if next_balance > 0:
         return [op_inc(f"players.{player_id}.balance", amount)], []
 
-    return _bankrupt_player_patches(state, player_id), _bankrupt_player_events(
-        player_id,
-    )
+    patches = _bankrupt_player_patches(state, player_id)
+    events = _bankrupt_player_events(player_id)
+    _append_game_over_if_last_survivor(state, patches, events)
+    return patches, events
 
 
 def _get_toll_amount(tile_id: int, building_level: int) -> int:
@@ -545,6 +586,24 @@ def _apply_build(
     ]
 
 
+def _ensure_turn_management_action_available(
+    state: GameState,
+    *,
+    player_id: int,
+    invalid_phase_message: str,
+) -> None:
+    if state.current_player_id != player_id:
+        raise GameActionError(code="NOT_YOUR_TURN", message="현재 턴이 아닙니다.")
+    if state.status != "playing" or state.phase not in (
+        PHASE_WAIT_ROLL,
+        PHASE_RESOLVING,
+    ):
+        raise GameActionError(
+            code="INVALID_PHASE",
+            message=invalid_phase_message,
+        )
+
+
 def _apply_toll_payment(
     state: GameState,
     *,
@@ -594,6 +653,7 @@ def _apply_toll_payment(
 
     patches.extend(_bankrupt_player_patches(state, player_id))
     events.extend(_bankrupt_player_events(player_id))
+    _append_game_over_if_last_survivor(state, patches, events)
     return events, patches
 
 
@@ -627,6 +687,20 @@ def process_buy_property_action(
     )
 
 
+def process_city_build_action(
+    state: GameState,
+    *,
+    player_id: int,
+    tile_id: int,
+) -> tuple[list[dict], list[dict]]:
+    _ensure_turn_management_action_available(
+        state,
+        player_id=player_id,
+        invalid_phase_message="지금은 건설할 수 없습니다.",
+    )
+    return _apply_build(state, player_id=player_id, tile_id=tile_id)
+
+
 def process_sell_property_action(
     state: GameState,
     *,
@@ -634,12 +708,11 @@ def process_sell_property_action(
     tile_id: int,
     building_level: int | None,
 ) -> tuple[list[dict], list[dict]]:
-    if state.current_player_id != player_id:
-        raise GameActionError(code="NOT_YOUR_TURN", message="내 턴이 아닙니다.")
-    if state.status != "playing" or state.phase != PHASE_WAIT_ROLL:
-        raise GameActionError(
-            code="INVALID_PHASE", message="지금은 매각할 수 없습니다."
-        )
+    _ensure_turn_management_action_available(
+        state,
+        player_id=player_id,
+        invalid_phase_message="지금은 매각할 수 없습니다.",
+    )
 
     tile_def = TILE_MAP.get(tile_id)
     tile_state = state.tile(tile_id)
@@ -692,6 +765,21 @@ def process_sell_property_action(
         )
 
     return events, patches
+
+
+def process_turn_sell_property_action(
+    state: GameState,
+    *,
+    player_id: int,
+    tile_id: int,
+    building_level: int | None,
+) -> tuple[list[dict], list[dict]]:
+    return process_sell_property_action(
+        state,
+        player_id=player_id,
+        tile_id=tile_id,
+        building_level=building_level,
+    )
 
 
 def resolve_landing(
