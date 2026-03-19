@@ -271,7 +271,7 @@ def register_game_handlers(
                 {
                     "gameId": game_id or None,
                     "code": "AUTH_REQUIRED",
-                    "message": "?몄쬆???꾩슂?⑸땲??",
+                    "message": "인증이 필요합니다.",
                 },
                 to=sid,
             )
@@ -283,7 +283,7 @@ def register_game_handlers(
                 {
                     "gameId": None,
                     "code": "INVALID_REQUEST",
-                    "message": "gameId媛 ?꾩슂?⑸땲??",
+                    "message": "gameId가 필요합니다.",
                 },
                 to=sid,
             )
@@ -296,7 +296,7 @@ def register_game_handlers(
                 {
                     "gameId": game_id,
                     "code": "GAME_NOT_FOUND",
-                    "message": "寃뚯엫??李얠쓣 ???놁뒿?덈떎.",
+                    "message": "게임을 찾을 수 없습니다.",
                 },
                 to=sid,
             )
