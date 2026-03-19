@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 import pytest
 
+import app.game.timer as game_timer
 from app.game.enums import PlayerState
 from app.game.models import (
     GameState,
@@ -14,7 +15,6 @@ from app.game.models import (
 )
 from app.game.socket_handlers import register_game_handlers
 from app.game.sync_runtime import GameSyncRuntime
-import app.game.timer as game_timer
 
 
 class FakeSio:
@@ -215,7 +215,9 @@ async def test_game_sync_timer_returns_turn_and_prompt_remaining(monkeypatch):
     )
 
     monkeypatch.setattr(game_timer, "_turn_deadlines_ms", {"game-1": 130000})
-    monkeypatch.setattr(game_timer, "_prompt_deadlines_ms", {"game-1": ("prompt-1", 118000)})
+    monkeypatch.setattr(
+        game_timer, "_prompt_deadlines_ms", {"game-1": ("prompt-1", 118000)}
+    )
     monkeypatch.setattr(game_timer, "_now_ms", lambda: 100000)
 
     async def fake_get_game_state(_game_id: str) -> GameState:

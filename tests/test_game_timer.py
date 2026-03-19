@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from app.game.board import BOARD
 from app.game.enums import PlayerState, TileType
-from app.game.models import GameState, PendingPrompt, PlayerGameState, PromptChoice, TileGameState
+from app.game.models import (
+    GameState,
+    PendingPrompt,
+    PlayerGameState,
+    PromptChoice,
+    TileGameState,
+)
 from app.game.timer import process_turn_timeout
 
 
