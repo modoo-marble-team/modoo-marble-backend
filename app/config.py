@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:5173"]
 
-    GAME_SYNC_DISCONNECT_GRACE_SECONDS: int = 30
+    GAME_SYNC_DISCONNECT_GRACE_SECONDS: int = 60
     GAME_SYNC_TIMER_CLAIM_TTL_SECONDS: int = 3
     GAME_SYNC_DISCONNECT_SCHEDULE_SHARDS: int = 16
     GAME_SYNC_WORKER_POLL_INTERVAL_SECONDS: int = 1

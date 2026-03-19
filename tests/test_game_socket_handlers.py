@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 import pytest
 
+import app.game.timer as game_timer
 from app.game.enums import PlayerState
 from app.game.models import (
     GameState,
@@ -192,6 +193,72 @@ async def test_handle_sync_includes_snapshot_for_initial_revision_zero(monkeypat
     assert patch_events[0]["data"]["revision"] == 0
     assert patch_events[0]["data"]["snapshot"] is not None
     assert patch_events[0]["data"]["snapshot"]["gameId"] == "game-1"
+
+
+@pytest.mark.asyncio
+async def test_game_sync_timer_returns_turn_and_prompt_remaining(monkeypatch):
+    sio = FakeSio()
+    state = make_state()
+    state.pending_prompt = PendingPrompt(
+        prompt_id="prompt-1",
+        type="BUY_OR_SKIP",
+        player_id=1,
+        title="구매",
+        message="구매하시겠습니까?",
+        timeout_sec=30,
+        choices=[
+            PromptChoice(id="buy", label="구매", value="BUY"),
+            PromptChoice(id="skip", label="건너뛰기", value="SKIP"),
+        ],
+        payload={"tileId": 4},
+        default_choice="SKIP",
+    )
+
+    monkeypatch.setattr(game_timer, "_turn_deadlines_ms", {"game-1": 130000})
+    monkeypatch.setattr(
+        game_timer, "_prompt_deadlines_ms", {"game-1": ("prompt-1", 118000)}
+    )
+    monkeypatch.setattr(game_timer, "_now_ms", lambda: 100000)
+
+    async def fake_get_game_state(_game_id: str) -> GameState:
+        return state
+
+    monkeypatch.setattr("app.game.socket_handlers.get_game_state", fake_get_game_state)
+
+    register_game_handlers(sio, {"sid-1": 1})
+    handler = sio.handlers["game:sync_timer"]
+
+    await handler("sid-1", {"gameId": "game-1"})
+
+    timer_events = [item for item in sio.emitted if item["event"] == "game:timer_sync"]
+    assert len(timer_events) == 1
+    assert timer_events[0]["to"] == "sid-1"
+    assert timer_events[0]["data"]["turnRemainingMs"] == 30000
+    assert timer_events[0]["data"]["turnRemainingSec"] == 30
+    assert timer_events[0]["data"]["prompt"]["promptId"] == "prompt-1"
+    assert timer_events[0]["data"]["prompt"]["remainingMs"] == 18000
+    assert timer_events[0]["data"]["prompt"]["remainingSec"] == 18
+
+
+@pytest.mark.asyncio
+async def test_game_sync_timer_rejects_non_member(monkeypatch):
+    sio = FakeSio()
+    state = make_state()
+
+    async def fake_get_game_state(_game_id: str) -> GameState:
+        return state
+
+    monkeypatch.setattr("app.game.socket_handlers.get_game_state", fake_get_game_state)
+
+    register_game_handlers(sio, {"sid-3": 3})
+    handler = sio.handlers["game:sync_timer"]
+
+    await handler("sid-3", {"gameId": "game-1"})
+
+    error_events = [item for item in sio.emitted if item["event"] == "game:error"]
+    assert len(error_events) == 1
+    assert error_events[0]["to"] == "sid-3"
+    assert error_events[0]["data"]["code"] == "NOT_GAME_MEMBER"
 
 
 @pytest.mark.asyncio

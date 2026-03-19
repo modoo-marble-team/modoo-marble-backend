@@ -16,9 +16,11 @@ from app.game.models import GameState, PlayerGameState
 from app.game.patch import op_set
 from app.game.presentation import serialize_game_patch
 from app.game.rules import PHASE_GAME_OVER, PHASE_WAIT_ROLL
-from app.game.state import game_lock, get_game_state, save_game_state
+from app.game.state import delete_game_state, game_lock, get_game_state, save_game_state
+from app.game.timer import cancel_turn_timer
 from app.presence import update_status
 from app.redis_client import get_redis
+from app.services.room_service import RoomService
 
 logger = structlog.get_logger()
 
@@ -52,6 +54,9 @@ class GameSyncRuntime:
 
     def _active_game_key(self, user_id: int) -> str:
         return f"game:user:{user_id}:active"
+
+    def _legacy_user_game_key(self, user_id: int) -> str:
+        return f"user:{user_id}:game"
 
     def _disconnect_schedule_key(self, shard: int) -> str:
         return f"game:disconnect_schedule:{shard}"
@@ -680,8 +685,7 @@ class GameSyncRuntime:
                 await self.clear_disconnected_at(game_id=game_id, player_id=player_id)
                 await self._sio.emit("game:patch", packet, room=f"game:{game_id}")
                 if state.status == "finished":
-                    for pid in state.players:
-                        await update_status(user_id=str(pid), status="lobby")
+                    await self.finalize_finished_game(state)
             finally:
                 redis = get_redis()
                 await redis.delete(self._timer_claim_key(game_id, player_id))
@@ -819,6 +823,38 @@ class GameSyncRuntime:
 
     def _active_players(self, state: GameState) -> list[PlayerGameState]:
         return state.active_players()
+
+    async def finalize_finished_game(self, state: GameState) -> dict | None:
+        room_service = RoomService()
+        redis = get_redis()
+
+        cancel_turn_timer(state.game_id)
+        room = await room_service.finish_game_room(room_id=state.room_id)
+
+        if room is not None:
+            await self._sio.emit(
+                "lobby_updated",
+                {"action": "status_changed", "room": room_service.room_card(room)},
+            )
+            await self._sio.emit(
+                "room_updated",
+                room_service.room_snapshot(room),
+                room=f"room:{state.room_id}",
+            )
+
+        for player_id in state.players:
+            await self.clear_active_game(user_id=player_id)
+            await redis.delete(self._legacy_user_game_key(player_id))
+            await self.clear_disconnected_at(
+                game_id=state.game_id,
+                player_id=player_id,
+            )
+            if player_id in self._user_sids:
+                await update_status(user_id=str(player_id), status="in_room")
+
+        await delete_game_state(state.game_id)
+        await redis.delete(self._patchlog_key(state.game_id))
+        return room
 
 
 _runtime: GameSyncRuntime | None = None

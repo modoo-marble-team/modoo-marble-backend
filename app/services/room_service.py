@@ -297,6 +297,36 @@ class RoomService:
         await self._save_room(room)
         return room, new_host_id
 
+    async def cleanup_abandoned_room(
+        self,
+        *,
+        room_id: str,
+        player_ids: list[int],
+    ) -> None:
+        room = await self.get_room(room_id)
+        if room is None:
+            for player_id in player_ids:
+                await self._clear_user_room_id(player_id)
+            return
+
+        for player_id in player_ids:
+            await self._clear_user_room_id(player_id)
+
+        await self._delete_room(room_id)
+
+    async def finish_game_room(self, *, room_id: str) -> dict | None:
+        room = await self.get_room(room_id)
+        if room is None:
+            return None
+
+        room["status"] = "waiting"
+        room["game_id"] = None
+        for player in room["players"]:
+            player["is_ready"] = False
+
+        await self._save_room(room)
+        return room
+
     async def toggle_ready(self, *, room_id: str, user_id: int) -> tuple[dict, bool]:
         room = await self._require_room(room_id)
         player = self._require_member(room, user_id)

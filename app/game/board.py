@@ -70,7 +70,7 @@ BOARD: list[TileDefinition] = [
     _prop(17, "제주", 4),
     _prop(18, "여수", 4),
     _prop(19, "광주", 4),
-    _special(20, "찬스", TileType.CHANCE),
+    _special(20, "이벤트", TileType.EVENT),
     _prop(21, "춘천", 4),
     _prop(22, "강릉", 4),
     _prop(23, "원주", 4),
