@@ -4,11 +4,13 @@ import random
 import string
 
 from app.models.user import User
+from app.utils.nickname_rand import generate_nickname
 
 
 def make_guest_nickname() -> str:
-    suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
-    return f"Guest_{suffix}"
+    # suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=8))
+    # return f"Guest_{suffix}"
+    return generate_nickname()
 
 
 async def make_unique_nickname(base: str) -> str:
