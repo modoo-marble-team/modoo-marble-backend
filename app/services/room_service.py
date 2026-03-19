@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from app.errors import ApiError
+from app.game.models import GameState
 from app.game.state import init_game_state
 from app.models.game import Game
 from app.models.user import User
@@ -329,7 +330,7 @@ class RoomService:
         await self._save_room(room)
         return room, chat_message
 
-    async def start_game(self, *, room_id: str, user_id: int) -> tuple[dict, dict]:
+    async def start_game(self, *, room_id: str, user_id: int) -> tuple[dict, GameState]:
         room = await self._require_room(room_id)
         host_player = self._host_player(room)
         if host_player["id"] != str(user_id):

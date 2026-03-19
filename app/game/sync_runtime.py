@@ -218,13 +218,14 @@ class GameSyncRuntime:
             return state
 
         if known_revision == current_revision:
+            include_snapshot = current_revision == 0
             await self._sio.emit(
                 "game:patch",
                 serialize_game_patch(
                     state,
                     events=[sync_event],
                     patches=[],
-                    include_snapshot=False,
+                    include_snapshot=include_snapshot,
                 ),
                 to=sid,
             )

@@ -25,6 +25,7 @@ PROMPT_CHOICE_CANONICAL_MAP: dict[str, tuple[str, ...]] = {
     "BUY_OR_SKIP": ("BUY", "SKIP"),
     "BUILD_OR_SKIP": ("BUILD", "SKIP"),
     "PAY_TOLL": ("PAY_TOLL",),
+    "ACQUISITION_OR_SKIP": ("ACQUIRE", "SKIP"),
     "CONFIRM_ONLY": ("CONFIRM",),
     "TRAVEL_SELECT": ("CONFIRM", "SKIP"),
 }
@@ -213,6 +214,74 @@ def _get_sell_refund(tile_id: int, building_level: int) -> int:
             refund += base_price * SELL_REFUND_MULTIPLIER_TIER_6
 
     return refund
+
+
+def _get_acquisition_cost(tile_id: int, building_level: int) -> int:
+    tile_def = TILE_MAP[tile_id]
+    if building_level < 0:
+        return tile_def.price
+
+    invested_build_cost = sum(tile_def.build_costs[1 : building_level + 1])
+    return tile_def.price + invested_build_cost
+
+
+def _apply_property_acquisition(
+    state: GameState,
+    *,
+    player_id: int,
+    tile_id: int,
+) -> tuple[list[dict], list[dict]]:
+    tile_def = TILE_MAP.get(tile_id)
+    tile_state = state.tile(tile_id)
+    if (
+        tile_def is None
+        or tile_state is None
+        or tile_def.tile_type != TileType.PROPERTY
+    ):
+        raise GameActionError(
+            code="INVALID_TILE",
+            message="인수할 수 없는 땅입니다.",
+        )
+
+    owner_id = tile_state.owner_id
+    if owner_id is None or owner_id == player_id:
+        raise GameActionError(
+            code="INVALID_PHASE",
+            message="인수할 대상 땅이 없습니다.",
+        )
+
+    player = state.require_player(player_id)
+    acquisition_cost = _get_acquisition_cost(tile_id, tile_state.building_level)
+    if player.balance < acquisition_cost:
+        raise GameActionError(
+            code="INSUFFICIENT_FUNDS",
+            message="인수 금액이 부족합니다.",
+        )
+
+    patches = [
+        op_inc(f"players.{player_id}.balance", -acquisition_cost),
+        op_inc(f"players.{owner_id}.balance", acquisition_cost),
+        op_set(f"tiles.{tile_id}.owner_id", player_id),
+        op_remove(f"players.{owner_id}.owned_tiles", tile_id),
+        op_remove(f"players.{owner_id}.building_levels", tile_id),
+        op_set(
+            f"players.{player_id}.building_levels.{tile_id}",
+            tile_state.building_level,
+        ),
+    ]
+    patches.extend(_owned_tile_patches(state, player_id, tile_id))
+
+    return [
+        {
+            "type": ServerEventType.ACQUIRED_PROPERTY,
+            "playerId": player_id,
+            "fromPlayerId": owner_id,
+            "toPlayerId": player_id,
+            "tileId": tile_id,
+            "amount": acquisition_cost,
+            "buildingLevel": tile_state.building_level,
+        }
+    ], patches
 
 
 def _apply_chance_card(
@@ -680,17 +749,22 @@ def resolve_landing(
 
         if owner_id != player_id:
             toll = _get_toll_amount(tile_id, building_level)
+            acquisition_cost = _get_acquisition_cost(tile_id, building_level)
             prompt = _make_prompt(
                 prompt_type="PAY_TOLL",
                 player_id=player_id,
                 title=f"{tile_def.name} 통행료",
-                message=f"{_player_name(state, owner_id)}님에게 {toll}만원을 지불합니다.",
+                message=(
+                    f"{_player_name(state, owner_id)}님의 {tile_def.name}입니다. "
+                    f"먼저 통행료 {toll}만원을 지불한 뒤 인수 여부를 결정합니다."
+                ),
                 choices=[PromptChoice(id="pay", label="확인", value="PAY_TOLL")],
                 payload={
                     "tileId": tile_id,
                     "tileName": tile_def.name,
                     "ownerId": owner_id,
                     "ownerName": _player_name(state, owner_id),
+                    "acquisitionCost": acquisition_cost,
                     "toll": toll,
                     "amount": toll,
                     "buildingLevel": building_level,
@@ -873,6 +947,38 @@ def process_prompt_response(
         )
         events.extend(action_events)
         patches.extend(action_patches)
+        toll = int(prompt.payload.get("toll", 0))
+        if state.require_player(player_id).balance >= toll:
+            acquisition_prompt = _make_prompt(
+                prompt_type="ACQUISITION_OR_SKIP",
+                player_id=player_id,
+                title=f"{prompt.payload.get('tileName', '도시')} 인수",
+                message=(
+                    f"{prompt.payload.get('ownerName', '상대')}님의 땅을 "
+                    f"{prompt.payload.get('acquisitionCost', 0)}만원에 인수하시겠습니까?"
+                ),
+                choices=[
+                    PromptChoice(id="acquire", label="인수하기", value="ACQUIRE"),
+                    PromptChoice(id="skip", label="넘기기", value="SKIP"),
+                ],
+                payload=dict(prompt.payload),
+                default_choice_value="SKIP",
+            )
+            patches.extend(
+                [
+                    op_set("pending_prompt", acquisition_prompt),
+                    op_set("phase", PHASE_WAIT_PROMPT),
+                ]
+            )
+    elif prompt.type == "ACQUISITION_OR_SKIP":
+        if normalized_choice == "ACQUIRE":
+            action_events, action_patches = _apply_property_acquisition(
+                state,
+                player_id=player_id,
+                tile_id=tile_id,
+            )
+            events.extend(action_events)
+            patches.extend(action_patches)
     elif prompt.type == "TRAVEL_SELECT" and normalized_choice == "CONFIRM":
         raw_target_tile_id = response_payload.get("targetTileId")
         try:

@@ -4,6 +4,7 @@ from app.game.actions.end_turn import MAX_ROUNDS, process_end_turn
 from app.game.actions.roll_dice import process_roll_dice
 from app.game.board import BOARD
 from app.game.enums import PlayerState, ServerEventType, TileType
+from app.game.errors import GameActionError
 from app.game.models import GameState, PlayerGameState, TileGameState
 from app.game.presentation import serialize_game_snapshot
 from app.game.rules import (
@@ -162,10 +163,11 @@ def test_property_landing_skip_does_not_transfer_ownership(monkeypatch):
     assert not any(event["type"] == "BOUGHT_PROPERTY" for event in prompt_events)
 
 
-def test_owned_property_requires_toll_prompt_and_transfers_money(monkeypatch):
+def test_owned_property_landing_prompts_for_toll_before_acquisition(monkeypatch):
     state = make_state()
     state.tile(4).owner_id = 1
     state.require_player(1).owned_tiles = [4]
+    state.require_player(1).building_levels = {4: 0}
     state.current_player_id = 2
     dice_values = iter([2, 2])
 
@@ -189,14 +191,165 @@ def test_owned_property_requires_toll_prompt_and_transfers_money(monkeypatch):
         choice="PAY_TOLL",
     )
     apply_patches(state, prompt_patches)
-    end_events, end_patches = process_end_turn(state, 2)
-    apply_patches(state, end_patches)
 
     assert any(event["type"] == "PAID_TOLL" for event in prompt_events)
     assert state.require_player(1).balance == 5500
     assert state.require_player(2).balance == 4500
-    assert end_events[0]["type"] == "TURN_ENDED"
-    assert state.current_player_id == 1
+    assert state.pending_prompt is not None
+    assert state.pending_prompt.type == "ACQUISITION_OR_SKIP"
+    assert state.phase == "WAIT_PROMPT"
+
+
+def test_owned_property_landing_can_acquire_full_property_with_buildings(monkeypatch):
+    state = make_state()
+    state.tile(4).owner_id = 1
+    state.tile(4).building_level = 2
+    state.require_player(1).owned_tiles = [4]
+    state.require_player(1).building_levels = {4: 2}
+    state.current_player_id = 2
+    dice_values = iter([2, 2])
+
+    monkeypatch.setattr(
+        "app.game.actions.roll_dice.random.randint",
+        lambda _start, _end: next(dice_values),
+    )
+
+    events, patches = process_roll_dice(state, 2)
+    apply_patches(state, patches)
+
+    prompt = state.pending_prompt
+    assert prompt is not None
+    assert prompt.type == "PAY_TOLL"
+    assert any(event["type"] == "LANDED" for event in events)
+
+    toll_events, toll_patches = process_prompt_response(
+        state,
+        player_id=2,
+        prompt_id=prompt.prompt_id,
+        choice="PAY_TOLL",
+    )
+    apply_patches(state, toll_patches)
+
+    acquisition_prompt = state.pending_prompt
+    assert acquisition_prompt is not None
+    assert acquisition_prompt.type == "ACQUISITION_OR_SKIP"
+    assert acquisition_prompt.payload["acquisitionCost"] == 800
+    assert acquisition_prompt.payload["buildingLevel"] == 2
+    assert any(event["type"] == "PAID_TOLL" for event in toll_events)
+
+    prompt_events, prompt_patches = process_prompt_response(
+        state,
+        player_id=2,
+        prompt_id=acquisition_prompt.prompt_id,
+        choice="ACQUIRE",
+    )
+    apply_patches(state, prompt_patches)
+
+    assert any(event["type"] == "ACQUIRED_PROPERTY" for event in prompt_events)
+    assert state.tile(4).owner_id == 2
+    assert state.tile(4).building_level == 2
+    assert state.require_player(1).balance == 5900
+    assert state.require_player(2).balance == 4100
+    assert state.require_player(1).owned_tiles == []
+    assert state.require_player(1).building_levels == {}
+    assert state.require_player(2).owned_tiles == [4]
+    assert state.require_player(2).building_levels == {4: 2}
+
+
+def test_owned_property_landing_skip_pays_toll_without_transfer(monkeypatch):
+    state = make_state()
+    state.tile(4).owner_id = 1
+    state.tile(4).building_level = 2
+    state.require_player(1).owned_tiles = [4]
+    state.require_player(1).building_levels = {4: 2}
+    state.current_player_id = 2
+    dice_values = iter([2, 2])
+
+    monkeypatch.setattr(
+        "app.game.actions.roll_dice.random.randint",
+        lambda _start, _end: next(dice_values),
+    )
+
+    _events, patches = process_roll_dice(state, 2)
+    apply_patches(state, patches)
+
+    prompt = state.pending_prompt
+    assert prompt is not None
+    assert prompt.type == "PAY_TOLL"
+
+    toll_events, toll_patches = process_prompt_response(
+        state,
+        player_id=2,
+        prompt_id=prompt.prompt_id,
+        choice="PAY_TOLL",
+    )
+    apply_patches(state, toll_patches)
+
+    acquisition_prompt = state.pending_prompt
+    assert acquisition_prompt is not None
+    assert acquisition_prompt.type == "ACQUISITION_OR_SKIP"
+
+    prompt_events, prompt_patches = process_prompt_response(
+        state,
+        player_id=2,
+        prompt_id=acquisition_prompt.prompt_id,
+        choice="SKIP",
+    )
+    apply_patches(state, prompt_patches)
+
+    assert any(event["type"] == "PAID_TOLL" for event in toll_events)
+    assert prompt_events == []
+    assert not any(event["type"] == "ACQUIRED_PROPERTY" for event in prompt_events)
+    assert state.tile(4).owner_id == 1
+    assert state.require_player(1).balance == 5100
+    assert state.require_player(2).balance == 4900
+
+
+def test_property_acquisition_requires_enough_balance(monkeypatch):
+    state = make_state()
+    state.tile(4).owner_id = 1
+    state.tile(4).building_level = 2
+    state.require_player(1).owned_tiles = [4]
+    state.require_player(1).building_levels = {4: 2}
+    state.require_player(2).balance = 700
+    state.current_player_id = 2
+    dice_values = iter([2, 2])
+
+    monkeypatch.setattr(
+        "app.game.actions.roll_dice.random.randint",
+        lambda _start, _end: next(dice_values),
+    )
+
+    _events, patches = process_roll_dice(state, 2)
+    apply_patches(state, patches)
+
+    toll_prompt = state.pending_prompt
+    assert toll_prompt is not None
+
+    toll_events, toll_patches = process_prompt_response(
+        state,
+        player_id=2,
+        prompt_id=toll_prompt.prompt_id,
+        choice="PAY_TOLL",
+    )
+    apply_patches(state, toll_patches)
+    assert any(event["type"] == "PAID_TOLL" for event in toll_events)
+
+    prompt = state.pending_prompt
+    assert prompt is not None
+    assert prompt.type == "ACQUISITION_OR_SKIP"
+
+    try:
+        process_prompt_response(
+            state,
+            player_id=2,
+            prompt_id=prompt.prompt_id,
+            choice="ACQUIRE",
+        )
+    except GameActionError as exc:
+        assert exc.code == "INSUFFICIENT_FUNDS"
+    else:
+        raise AssertionError("expected insufficient funds error")
 
 
 def test_sell_property_action_refunds_money_and_releases_tile():
