@@ -30,21 +30,6 @@ logger = structlog.get_logger()
 PROMPT_RESPONSE_ACK_TYPE = "PROMPT_RESPONSE"
 
 
-async def _revert_players_to_lobby(state: GameState) -> None:
-    from app.presence import update_status
-
-    for player_id in state.players:
-        try:
-            await update_status(user_id=str(player_id), status="lobby")
-        except Exception as exc:
-            logger.warning(
-                "presence lobby restore failed",
-                player_id=player_id,
-                game_id=state.game_id,
-                error=str(exc),
-            )
-
-
 def register_game_handlers(
     sio: socketio.AsyncServer,
     sid_to_user: dict[str, int],
@@ -442,9 +427,6 @@ def register_game_handlers(
                     game_id=str(game_id),
                 )
 
-                if state.status == "finished":
-                    await _revert_players_to_lobby(state)
-
         except LockAcquisitionError:
             await sio.emit(
                 "game:ack",
@@ -498,6 +480,8 @@ def register_game_handlers(
         )
         await sio.emit("game:patch", packet, room=f"game:{game_id}")
         await emit_prompt_if_needed(state)
+        if state.status == "finished":
+            await sync_runtime.finalize_finished_game(state)
 
     @sio.on("game:prompt_response")
     async def handle_prompt_response(sid: str, data: dict) -> None:
@@ -595,9 +579,6 @@ def register_game_handlers(
                     game_id=str(game_id),
                 )
 
-                if state.status == "finished":
-                    await _revert_players_to_lobby(state)
-
         except LockAcquisitionError:
             await sio.emit(
                 "game:ack",
@@ -654,3 +635,5 @@ def register_game_handlers(
         )
         await sio.emit("game:patch", packet, room=f"game:{game_id}")
         await emit_prompt_if_needed(state)
+        if state.status == "finished":
+            await sync_runtime.finalize_finished_game(state)

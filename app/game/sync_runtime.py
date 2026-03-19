@@ -685,10 +685,7 @@ class GameSyncRuntime:
                 await self.clear_disconnected_at(game_id=game_id, player_id=player_id)
                 await self._sio.emit("game:patch", packet, room=f"game:{game_id}")
                 if state.status == "finished":
-                    for pid in state.players:
-                        await update_status(user_id=str(pid), status="lobby")
-                    if self._all_game_players_offline(state):
-                        await self._cleanup_abandoned_game_room(state)
+                    await self.finalize_finished_game(state)
             finally:
                 redis = get_redis()
                 await redis.delete(self._timer_claim_key(game_id, player_id))
@@ -827,20 +824,23 @@ class GameSyncRuntime:
     def _active_players(self, state: GameState) -> list[PlayerGameState]:
         return state.active_players()
 
-    def _all_game_players_offline(self, state: GameState) -> bool:
-        return all(player_id not in self._user_sids for player_id in state.players)
-
-    async def _cleanup_abandoned_game_room(self, state: GameState) -> None:
+    async def finalize_finished_game(self, state: GameState) -> dict | None:
         room_service = RoomService()
         redis = get_redis()
 
         cancel_turn_timer(state.game_id)
-        await room_service.cleanup_abandoned_room(
-            room_id=state.room_id,
-            player_ids=list(state.players),
-        )
-        await delete_game_state(state.game_id)
-        await redis.delete(self._patchlog_key(state.game_id))
+        room = await room_service.finish_game_room(room_id=state.room_id)
+
+        if room is not None:
+            await self._sio.emit(
+                "lobby_updated",
+                {"action": "status_changed", "room": room_service.room_card(room)},
+            )
+            await self._sio.emit(
+                "room_updated",
+                room_service.room_snapshot(room),
+                room=f"room:{state.room_id}",
+            )
 
         for player_id in state.players:
             await self.clear_active_game(user_id=player_id)
@@ -849,11 +849,12 @@ class GameSyncRuntime:
                 game_id=state.game_id,
                 player_id=player_id,
             )
+            if player_id in self._user_sids:
+                await update_status(user_id=str(player_id), status="in_room")
 
-        await self._sio.emit(
-            "lobby_updated",
-            {"action": "removed", "room": {"id": state.room_id}},
-        )
+        await delete_game_state(state.game_id)
+        await redis.delete(self._patchlog_key(state.game_id))
+        return room
 
 
 _runtime: GameSyncRuntime | None = None

@@ -51,20 +51,11 @@ def make_state() -> GameState:
     )
 
 
-def test_all_game_players_offline_only_when_no_active_sids():
-    runtime = GameSyncRuntime(AsyncMock())
-    state = make_state()
-
-    assert runtime._all_game_players_offline(state) is True
-
-    runtime._user_sids[1] = {"sid-1"}
-    assert runtime._all_game_players_offline(state) is False
-
-
 @pytest.mark.asyncio
-async def test_cleanup_abandoned_game_room_clears_room_and_game_keys(monkeypatch):
+async def test_finalize_finished_game_keeps_room_and_clears_game_keys(monkeypatch):
     sio = AsyncMock()
     runtime = GameSyncRuntime(sio)
+    runtime._user_sids[1] = {"sid-1"}
     state = make_state()
 
     deleted_keys: list[str] = []
@@ -74,19 +65,32 @@ async def test_cleanup_abandoned_game_room_clears_room_and_game_keys(monkeypatch
             deleted_keys.extend(keys)
             return len(keys)
 
-    cleanup_room = AsyncMock()
+    room = {
+        "id": "room-1",
+        "title": "테스트 방",
+        "status": "waiting",
+        "max_players": 4,
+        "is_private": False,
+        "host_user_id": "1",
+        "game_id": None,
+        "players": [
+            {"id": "1", "nickname": "host", "is_host": True, "is_ready": False},
+            {"id": "2", "nickname": "guest", "is_host": False, "is_ready": False},
+        ],
+        "chat_messages": [],
+    }
+
+    finish_game_room = AsyncMock(return_value=room)
     clear_active_game = AsyncMock()
     clear_disconnected_at = AsyncMock()
     delete_game_state = AsyncMock()
+    update_status = AsyncMock()
     cancel_turn_timer = Mock()
 
+    monkeypatch.setattr("app.game.sync_runtime.get_redis", lambda: FakeRedis())
     monkeypatch.setattr(
-        "app.game.sync_runtime.get_redis",
-        lambda: FakeRedis(),
-    )
-    monkeypatch.setattr(
-        "app.game.sync_runtime.RoomService.cleanup_abandoned_room",
-        cleanup_room,
+        "app.game.sync_runtime.RoomService.finish_game_room",
+        finish_game_room,
     )
     monkeypatch.setattr(
         "app.game.sync_runtime.delete_game_state",
@@ -96,13 +100,17 @@ async def test_cleanup_abandoned_game_room_clears_room_and_game_keys(monkeypatch
         "app.game.sync_runtime.cancel_turn_timer",
         cancel_turn_timer,
     )
+    monkeypatch.setattr(
+        "app.game.sync_runtime.update_status",
+        update_status,
+    )
     monkeypatch.setattr(runtime, "clear_active_game", clear_active_game)
     monkeypatch.setattr(runtime, "clear_disconnected_at", clear_disconnected_at)
 
-    await runtime._cleanup_abandoned_game_room(state)
+    await runtime.finalize_finished_game(state)
 
     cancel_turn_timer.assert_called_once_with("game-1")
-    cleanup_room.assert_awaited_once_with(room_id="room-1", player_ids=[1, 2])
+    finish_game_room.assert_awaited_once_with(room_id="room-1")
     delete_game_state.assert_awaited_once_with("game-1")
     assert "game:game-1:patchlog" in deleted_keys
     assert "user:1:game" in deleted_keys
@@ -111,7 +119,33 @@ async def test_cleanup_abandoned_game_room_clears_room_and_game_keys(monkeypatch
     clear_active_game.assert_any_await(user_id=2)
     clear_disconnected_at.assert_any_await(game_id="game-1", player_id=1)
     clear_disconnected_at.assert_any_await(game_id="game-1", player_id=2)
-    sio.emit.assert_awaited_once_with(
+    update_status.assert_awaited_once_with(user_id="1", status="in_room")
+    assert sio.emit.await_args_list[0].args == (
         "lobby_updated",
-        {"action": "removed", "room": {"id": "room-1"}},
+        {
+            "action": "status_changed",
+            "room": {
+                "id": "room-1",
+                "title": "테스트 방",
+                "status": "waiting",
+                "current_players": 2,
+                "max_players": 4,
+                "is_private": False,
+                "host_id": "1",
+                "host_nickname": "host",
+            },
+        },
     )
+    assert sio.emit.await_args_list[1].args == (
+        "room_updated",
+        {
+            "room_id": "room-1",
+            "title": "테스트 방",
+            "status": "waiting",
+            "max_players": 4,
+            "is_private": False,
+            "players": room["players"],
+            "chat_messages": [],
+        },
+    )
+    assert sio.emit.await_args_list[1].kwargs == {"room": "room:room-1"}
