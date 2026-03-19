@@ -1,12 +1,78 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import random
+import time
 
 import socketio
 
 TURN_TIMEOUT_SECONDS = 30
 _timers: dict[str, asyncio.Task] = {}
+_turn_deadlines_ms: dict[str, int] = {}
+_prompt_deadlines_ms: dict[str, tuple[str, int]] = {}
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+def _remaining_ms(deadline_at_ms: int | None) -> int | None:
+    if deadline_at_ms is None:
+        return None
+    return max(deadline_at_ms - _now_ms(), 0)
+
+
+def _remaining_sec(remaining_ms: int | None) -> int | None:
+    if remaining_ms is None:
+        return None
+    return max(math.ceil(remaining_ms / 1000), 0)
+
+
+def sync_prompt_timer(*, game_id: str, prompt) -> int | None:
+    if prompt is None:
+        _prompt_deadlines_ms.pop(game_id, None)
+        return None
+
+    current = _prompt_deadlines_ms.get(game_id)
+    if current is not None and current[0] == prompt.prompt_id:
+        return current[1]
+
+    deadline_at_ms = _now_ms() + max(int(prompt.timeout_sec), 0) * 1000
+    _prompt_deadlines_ms[game_id] = (prompt.prompt_id, deadline_at_ms)
+    return deadline_at_ms
+
+
+def build_timer_sync_payload(*, game_id: str, state, user_id: int) -> dict:
+    turn_deadline_at_ms = _turn_deadlines_ms.get(game_id)
+    turn_remaining_ms = _remaining_ms(turn_deadline_at_ms)
+
+    prompt_payload = None
+    pending_prompt = state.pending_prompt
+    if pending_prompt is not None and pending_prompt.player_id == user_id:
+        prompt_deadline_at_ms = sync_prompt_timer(
+            game_id=game_id,
+            prompt=pending_prompt,
+        )
+        prompt_remaining_ms = _remaining_ms(prompt_deadline_at_ms)
+        prompt_payload = {
+            "promptId": pending_prompt.prompt_id,
+            "type": pending_prompt.type,
+            "timeoutSec": pending_prompt.timeout_sec,
+            "deadlineAtMs": prompt_deadline_at_ms,
+            "remainingMs": prompt_remaining_ms,
+            "remainingSec": _remaining_sec(prompt_remaining_ms),
+        }
+
+    return {
+        "gameId": game_id,
+        "revision": state.revision,
+        "serverTimeMs": _now_ms(),
+        "turnDeadlineAtMs": turn_deadline_at_ms,
+        "turnRemainingMs": turn_remaining_ms,
+        "turnRemainingSec": _remaining_sec(turn_remaining_ms),
+        "prompt": prompt_payload,
+    }
 
 
 def _resolve_afk_prompt_response(state, prompt) -> tuple[str, dict | None]:
@@ -92,6 +158,7 @@ async def _auto_end_turn(game_id: str, sio: socketio.AsyncServer) -> None:
                 return
 
             events, all_patches = process_turn_timeout(state)
+            sync_prompt_timer(game_id=game_id, prompt=state.pending_prompt)
 
             state.revision += 1
             await save_game_state(game_id, state)
@@ -114,11 +181,14 @@ async def _auto_end_turn(game_id: str, sio: socketio.AsyncServer) -> None:
 
 def start_turn_timer(game_id: str, sio: socketio.AsyncServer) -> None:
     cancel_turn_timer(game_id)
+    _turn_deadlines_ms[game_id] = _now_ms() + TURN_TIMEOUT_SECONDS * 1000
     task = asyncio.create_task(_auto_end_turn(game_id, sio))
     _timers[game_id] = task
 
 
 def cancel_turn_timer(game_id: str) -> None:
+    _turn_deadlines_ms.pop(game_id, None)
+    _prompt_deadlines_ms.pop(game_id, None)
     task = _timers.pop(game_id, None)
     if task and not task.done():
         task.cancel()

@@ -22,7 +22,7 @@ from app.game.state import (
     save_game_state,
 )
 from app.game.sync_runtime import init_game_sync_runtime
-from app.game.timer import start_turn_timer
+from app.game.timer import build_timer_sync_payload, start_turn_timer, sync_prompt_timer
 from app.services.room_service import RoomService
 
 logger = structlog.get_logger()
@@ -38,6 +38,7 @@ def register_game_handlers(
     sync_runtime = init_game_sync_runtime(sio)
 
     async def emit_prompt_if_needed(state: GameState) -> None:
+        sync_prompt_timer(game_id=state.game_id, prompt=state.pending_prompt)
         prompt_payload = serialize_prompt(state.pending_prompt)
         if not prompt_payload or state.pending_prompt is None:
             return
@@ -258,6 +259,66 @@ def register_game_handlers(
             return
 
         await emit_prompt_if_needed(state)
+
+    @sio.on("game:sync_timer")
+    async def game_sync_timer(sid: str, data: dict) -> None:
+        user_id = sid_to_user.get(sid)
+        game_id = str((data or {}).get("gameId") or "")
+
+        if user_id is None:
+            await sio.emit(
+                "game:error",
+                {
+                    "gameId": game_id or None,
+                    "code": "AUTH_REQUIRED",
+                    "message": "?몄쬆???꾩슂?⑸땲??",
+                },
+                to=sid,
+            )
+            return
+
+        if not game_id:
+            await sio.emit(
+                "game:error",
+                {
+                    "gameId": None,
+                    "code": "INVALID_REQUEST",
+                    "message": "gameId媛 ?꾩슂?⑸땲??",
+                },
+                to=sid,
+            )
+            return
+
+        state = await get_game_state(game_id)
+        if state is None:
+            await sio.emit(
+                "game:error",
+                {
+                    "gameId": game_id,
+                    "code": "GAME_NOT_FOUND",
+                    "message": "寃뚯엫??李얠쓣 ???놁뒿?덈떎.",
+                },
+                to=sid,
+            )
+            return
+
+        if not await ensure_game_room_membership(
+            sid=sid,
+            game_id=game_id,
+            state=state,
+            user_id=user_id,
+        ):
+            return
+
+        await sio.emit(
+            "game:timer_sync",
+            build_timer_sync_payload(
+                game_id=game_id,
+                state=state,
+                user_id=user_id,
+            ),
+            to=sid,
+        )
 
     @sio.on("game:action")
     async def handle_game_action(sid: str, data: dict) -> None:
