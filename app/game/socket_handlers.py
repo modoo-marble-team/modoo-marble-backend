@@ -9,10 +9,9 @@ from app.game.enums import ActionType
 from app.game.errors import GameActionError
 from app.game.models import GameState
 from app.game.rules import (
-    process_city_build_action,
     process_buy_property_action,
+    process_city_build_action,
     process_prompt_response,
-    process_sell_property_action,
     process_turn_sell_property_action,
     serialize_prompt,
 )
@@ -130,8 +129,7 @@ def register_game_handlers(
         previous_player_id: int,
     ) -> bool:
         return (
-            state.turn != previous_turn
-            or state.current_player_id != previous_player_id
+            state.turn != previous_turn or state.current_player_id != previous_player_id
         )
 
     def parse_travel_target(payload: dict) -> int:
