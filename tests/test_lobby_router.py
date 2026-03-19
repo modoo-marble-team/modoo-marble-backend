@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-from app.game.models import GameState, PlayerGameState
 from app.game.enums import PlayerState
+from app.game.models import GameState, PlayerGameState
 from app.routers import lobby
 
 
