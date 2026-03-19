@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import is_dataclass
 from typing import Any
 
 from app.game.board import BOARD
 from app.game.enums import PlayerState
+from app.game.models import GameState, PlayerGameState
 from app.game.rules import PHASE_GAME_OVER, serialize_prompt
-from app.game.schemas import GameState, PlayerGameState
 from app.game.timer import TURN_TIMEOUT_SECONDS
 
 PLAYER_COLORS = ["#EF5350", "#42A5F5", "#66BB6A", "#FFD15B"]
@@ -25,26 +26,37 @@ NETWORK_KEY_MAP = {
     "current_tile_id": "currentTileId",
     "current_player_id": "currentPlayerId",
     "owned_tile_ids": "ownedTiles",
+    "owned_tiles": "ownedTiles",
     "building_level": "buildingLevel",
+    "building_levels": "buildingLevels",
     "state_duration": "stateDuration",
     "known_revision": "knownRevision",
     "current_revision": "currentRevision",
     "winner_player_id": "winnerPlayerId",
-    "state": "playerState",
+    "winner_id": "winnerId",
+    "player_state": "playerState",
+    "turn_order": "turnOrder",
+    "room_id": "roomId",
+    "game_id": "gameId",
+    "prompt_id": "promptId",
+    "timeout_sec": "timeoutSec",
+    "default_choice": "defaultChoice",
 }
 
 PATCH_PATH_MAP = {
     "current_tile_id": "currentTileId",
     "current_player_id": "currentPlayerId",
     "owned_tile_ids": "ownedTiles",
+    "owned_tiles": "ownedTiles",
     "owner_id": "ownerId",
     "building_level": "buildingLevel",
+    "building_levels": "buildingLevels",
     "state_duration": "stateDuration",
+    "winner_id": "winnerId",
+    "player_state": "playerState",
+    "turn_order": "turnOrder",
+    "pending_prompt": "prompt",
 }
-
-
-def _ordered_players(state: GameState) -> list[PlayerGameState]:
-    return sorted(state["players"].values(), key=lambda player: player["turnOrder"])
 
 
 def _normalize_scalar(value: Any) -> Any:
@@ -58,12 +70,14 @@ def _normalize_key(key: str) -> str:
 
 
 def _normalize_payload(value: Any) -> Any:
+    if is_dataclass(value) and hasattr(value, "to_json"):
+        return _normalize_payload(value.to_json())
+
     if isinstance(value, dict):
-        normalized: dict[str, Any] = {}
-        for key, item in value.items():
-            out_key = _normalize_key(str(key))
-            normalized[out_key] = _normalize_payload(item)
-        return normalized
+        return {
+            _normalize_key(str(key)): _normalize_payload(item)
+            for key, item in value.items()
+        }
 
     if isinstance(value, list):
         return [_normalize_payload(item) for item in value]
@@ -90,74 +104,60 @@ def _serialize_patch_ops(patch_ops: list[dict] | None) -> list[dict]:
     return serialized
 
 
-def _get_state_value(state: dict, *keys: str, default: Any = None) -> Any:
-    for key in keys:
-        if key in state:
-            return state[key]
-    return default
+def _ordered_players(state: GameState) -> list[PlayerGameState]:
+    return state.ordered_players()
 
 
-def serialize_game_snapshot(state: GameState) -> dict:
-    players = _ordered_players(state)
+def serialize_game_snapshot(state: GameState) -> dict[str, Any]:
     tiles = []
-
     for tile in BOARD:
-        tile_state = state["tiles"].get(
-            str(tile.tile_id),
-            {"ownerId": None, "buildingLevel": 0},
-        )
-        owner_id = tile_state.get("ownerId")
+        tile_state = state.tile(tile.tile_id)
+        owner_id = tile_state.owner_id if tile_state else None
+        building_level = tile_state.building_level if tile_state else 0
         tiles.append(
             {
                 "id": tile.tile_id,
                 "name": tile.name,
                 "type": str(tile.tile_type),
                 "ownerId": str(owner_id) if owner_id is not None else None,
-                "buildingLevel": tile_state.get("buildingLevel", 0),
+                "buildingLevel": building_level,
                 "price": tile.price,
             }
         )
 
-    serialized_players = []
-    for index, player in enumerate(players):
-        serialized_players.append(
+    players = []
+    for index, player in enumerate(_ordered_players(state)):
+        players.append(
             {
-                "playerId": str(player["playerId"]),
-                "nickname": player["nickname"],
-                "currentTileId": player["currentTileId"],
-                "balance": player["balance"],
-                "ownedTiles": player["ownedTiles"],
-                "isInJail": player["playerState"] == PlayerState.LOCKED,
-                "stateDuration": player["stateDuration"],
-                "isBankrupt": player["playerState"] == PlayerState.BANKRUPT,
-                "playerState": PLAYER_STATE_MAP.get(player["playerState"], "normal"),
+                "playerId": str(player.player_id),
+                "nickname": player.nickname,
+                "currentTileId": player.current_tile_id,
+                "balance": player.balance,
+                "ownedTiles": player.owned_tiles,
+                "isInJail": player.player_state == PlayerState.LOCKED,
+                "stateDuration": player.state_duration,
+                "isBankrupt": player.player_state == PlayerState.BANKRUPT,
+                "playerState": PLAYER_STATE_MAP.get(
+                    player.player_state.value,
+                    "normal",
+                ),
                 "color": PLAYER_COLORS[index % len(PLAYER_COLORS)],
             }
         )
 
-    current_player_id = _get_state_value(
-        state,
-        "currentPlayerId",
-        "current_player_id",
-        default=None,
-    )
-    winner_id = _get_state_value(state, "winnerId", "winner_id", default=None)
-
     return {
-        "roomId": _get_state_value(state, "roomId", "room_id"),
-        "gameId": _get_state_value(state, "gameId", "game_id"),
-        "revision": state["revision"],
-        "phase": state["phase"] if state["status"] == "playing" else PHASE_GAME_OVER,
-        "players": serialized_players,
+        "roomId": state.room_id,
+        "gameId": state.game_id,
+        "revision": state.revision,
+        "phase": state.phase if state.status == "playing" else PHASE_GAME_OVER,
+        "players": players,
         "tiles": tiles,
-        "currentPlayerId": str(current_player_id)
-        if current_player_id is not None
-        else None,
-        "round": state["round"],
+        "currentPlayerId": str(state.current_player_id),
+        "round": state.round,
         "turnTimeoutSec": TURN_TIMEOUT_SECONDS,
-        "prompt": serialize_prompt(state.get("pending_prompt")),
-        "isGameOver": state["status"] != "playing",
-        "winnerId": str(winner_id) if winner_id is not None else None,
+        "prompt": serialize_prompt(state.pending_prompt),
+        "isGameOver": state.status != "playing",
+        "winnerId": str(state.winner_id) if state.winner_id is not None else None,
     }
 
 
@@ -167,11 +167,11 @@ def serialize_game_patch(
     events: list[dict],
     patches: list[dict] | None = None,
     include_snapshot: bool = True,
-) -> dict:
+) -> dict[str, Any]:
     return {
-        "gameId": _get_state_value(state, "gameId", "game_id"),
-        "revision": state["revision"],
-        "turn": state["turn"],
+        "gameId": state.game_id,
+        "revision": state.revision,
+        "turn": state.turn,
         "events": [_normalize_payload(event) for event in events],
         "patch": _serialize_patch_ops(patches),
         "snapshot": serialize_game_snapshot(state) if include_snapshot else None,

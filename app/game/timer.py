@@ -13,7 +13,6 @@ async def _auto_end_turn(game_id: str, sio: socketio.AsyncServer) -> None:
 
     from app.game.actions.end_turn import process_end_turn
     from app.game.errors import GameActionError
-    from app.game.presentation import serialize_game_patch
     from app.game.rules import default_prompt_choice, process_prompt_response
     from app.game.state import (
         LockAcquisitionError,
@@ -22,21 +21,22 @@ async def _auto_end_turn(game_id: str, sio: socketio.AsyncServer) -> None:
         get_game_state,
         save_game_state,
     )
+    from app.game.sync_runtime import init_game_sync_runtime
 
     try:
         async with game_lock(game_id):
             state = await get_game_state(game_id)
-            if state is None or state["status"] != "playing":
+            if state is None or state.status != "playing":
                 return
 
-            player_id = state["current_player_id"]
+            player_id = state.current_player_id
             all_patches: list[dict] = []
-            if state.get("pending_prompt") is not None:
-                prompt = state["pending_prompt"]
+            if state.pending_prompt is not None:
+                prompt = state.pending_prompt
                 events, patches = process_prompt_response(
                     state,
                     player_id=player_id,
-                    prompt_id=prompt["prompt_id"],
+                    prompt_id=prompt.prompt_id,
                     choice=default_prompt_choice(prompt),
                 )
                 apply_patches(state, patches)
@@ -50,16 +50,19 @@ async def _auto_end_turn(game_id: str, sio: socketio.AsyncServer) -> None:
                 apply_patches(state, patches)
                 all_patches.extend(patches)
 
-            state["revision"] += 1
+            state.revision += 1
             await save_game_state(game_id, state)
 
-        await sio.emit(
-            "game:patch",
-            serialize_game_patch(state, events=events, patches=all_patches),
-            room=f"game:{game_id}",
+        runtime = init_game_sync_runtime(sio)
+        packet = await runtime.build_and_store_patch_packet(
+            state=state,
+            events=events,
+            patches=all_patches,
+            include_snapshot=False,
         )
+        await sio.emit("game:patch", packet, room=f"game:{game_id}")
 
-        if state["status"] == "playing":
+        if state.status == "playing":
             start_turn_timer(game_id, sio)
 
     except (LockAcquisitionError, GameActionError):

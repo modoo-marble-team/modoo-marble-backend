@@ -1,50 +1,32 @@
 from __future__ import annotations
 
-from app.game.enums import PlayerState, ServerEventType
+from app.game.enums import ServerEventType
 from app.game.errors import GameActionError
+from app.game.models import GameState
+from app.game.patch import op_set
 from app.game.rules import PHASE_GAME_OVER, PHASE_WAIT_PROMPT, PHASE_WAIT_ROLL
-from app.game.schemas import GameState
 
 MAX_ROUNDS = 20
 
 
 def get_next_player_id(state: GameState, current_player_id: int) -> int:
-    """
-    다음 턴을 할 플레이어 ID를 반환한다.
-    파산한 플레이어는 건너뛴다.
-    """
-    # 파산하지 않은 플레이어만 turnOrder 순으로 정렬
-    active_players = sorted(
-        [
-            p
-            for p in state["players"].values()
-            if p["playerState"] != PlayerState.BANKRUPT
-        ],
-        key=lambda p: p["turnOrder"],
-    )
-
+    active_players = state.active_players()
     if not active_players:
         return current_player_id
 
-    current_order = state["players"][str(current_player_id)]["turnOrder"]
-
-    # 현재보다 order가 높은 첫 번째 플레이어
-    for p in active_players:
-        if p["turnOrder"] > current_order:
-            return p["playerId"]
-
-    # 없으면 처음으로 돌아감 (한 바퀴 완료)
-    return active_players[0]["playerId"]
+    current_order = state.require_player(current_player_id).turn_order
+    for player in active_players:
+        if player.turn_order > current_order:
+            return player.player_id
+    return active_players[0].player_id
 
 
 def _find_winner(state: GameState) -> dict:
-    """잔액이 가장 많은 플레이어를 승자로 반환한다."""
-    players = list(state["players"].values())
-    winner = max(players, key=lambda p: p["balance"])
+    winner = max(state.players.values(), key=lambda player: player.balance)
     return {
-        "playerId": winner["playerId"],
-        "nickname": winner["nickname"],
-        "balance": winner["balance"],
+        "playerId": winner.player_id,
+        "nickname": winner.nickname,
+        "balance": winner.balance,
     }
 
 
@@ -52,21 +34,19 @@ def process_end_turn(
     state: GameState,
     player_id: int,
 ) -> tuple[list[dict], list[dict]]:
-    if state["current_player_id"] != player_id:
-        raise GameActionError(code="NOT_YOUR_TURN", message="It is not your turn.")
-    if state["status"] != "playing":
-        raise GameActionError(code="INVALID_PHASE", message="Game is not active.")
-    if state["phase"] == PHASE_WAIT_PROMPT:
+    if state.current_player_id != player_id:
+        raise GameActionError(code="NOT_YOUR_TURN", message="내 턴이 아닙니다.")
+    if state.status != "playing":
         raise GameActionError(
-            code="INVALID_PHASE", message="Resolve the pending prompt first."
+            code="INVALID_PHASE", message="진행 중인 게임이 아닙니다."
+        )
+    if state.phase == PHASE_WAIT_PROMPT:
+        raise GameActionError(
+            code="INVALID_PHASE",
+            message="대기 중인 프롬프트를 먼저 처리해주세요.",
         )
 
-    active_players = [
-        player
-        for player in state["players"].values()
-        if player["playerState"] != PlayerState.BANKRUPT
-    ]
-    if len(active_players) <= 1:
+    if len(state.active_players()) <= 1:
         winner = _find_winner(state)
         return [
             {
@@ -75,29 +55,27 @@ def process_end_turn(
                 "winner": winner,
             }
         ], [
-            {"op": "set", "path": "status", "value": "finished"},
-            {"op": "set", "path": "phase", "value": PHASE_GAME_OVER},
-            {"op": "set", "path": "pending_prompt", "value": None},
-            {"op": "set", "path": "winnerId", "value": winner["playerId"]},
+            op_set("status", "finished"),
+            op_set("phase", PHASE_GAME_OVER),
+            op_set("pending_prompt", None),
+            op_set("winner_id", winner["playerId"]),
         ]
 
     next_player_id = get_next_player_id(state, player_id)
-    current_order = state["players"][str(player_id)]["turnOrder"]
-    next_order = state["players"][str(next_player_id)]["turnOrder"]
+    current_order = state.require_player(player_id).turn_order
+    next_order = state.require_player(next_player_id).turn_order
 
-    new_turn = state["turn"] + 1
-    new_round = state["round"] + 1 if next_order <= current_order else state["round"]
+    new_turn = state.turn + 1
+    new_round = state.round + 1 if next_order <= current_order else state.round
 
     patches = [
-        {"op": "set", "path": "current_player_id", "value": next_player_id},
-        {"op": "set", "path": "turn", "value": new_turn},
-        {"op": "set", "path": "round", "value": new_round},
-        {"op": "set", "path": "phase", "value": PHASE_WAIT_ROLL},
-        {"op": "set", "path": "pending_prompt", "value": None},
-        # 턴이 끝나면 연속 더블 초기화
-        {"op": "set", "path": f"players.{player_id}.consecutiveDoubles", "value": 0},
+        op_set("current_player_id", next_player_id),
+        op_set("turn", new_turn),
+        op_set("round", new_round),
+        op_set("phase", PHASE_WAIT_ROLL),
+        op_set("pending_prompt", None),
+        op_set(f"players.{player_id}.consecutive_doubles", 0),
     ]
-
     events = [
         {
             "type": ServerEventType.TURN_ENDED,
@@ -108,12 +86,15 @@ def process_end_turn(
         }
     ]
 
-    # ── 20라운드 종료 조건 ───────────────────────────────
     if new_round > MAX_ROUNDS:
         winner = _find_winner(state)
-        patches.append({"op": "set", "path": "status", "value": "finished"})
-        patches.append({"op": "set", "path": "phase", "value": PHASE_GAME_OVER})
-        patches.append({"op": "set", "path": "winnerId", "value": winner["playerId"]})
+        patches.extend(
+            [
+                op_set("status", "finished"),
+                op_set("phase", PHASE_GAME_OVER),
+                op_set("winner_id", winner["playerId"]),
+            ]
+        )
         events.append(
             {
                 "type": ServerEventType.GAME_OVER,

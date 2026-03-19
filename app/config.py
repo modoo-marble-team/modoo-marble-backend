@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-from pydantic import model_validator
+from pathlib import Path
+
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_BACKEND_ROOT = Path(__file__).resolve().parents[1]
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_BACKEND_ROOT / ".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -14,7 +18,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgres://modoo:modoo1234@db:5432/modoo_marble"
     REDIS_URL: str = "redis://redis:6379"
 
-    JWT_SECRET: str
+    JWT_SECRET: str = ""
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_HOURS: int = 24
     JWT_ACCESS_EXPIRE_MINUTES: int = 60
@@ -50,17 +54,32 @@ class Settings(BaseSettings):
     GAME_SYNC_LEADER_TTL_SECONDS: int = 5
     GAME_SYNC_PATCH_KEEP_COUNT: int = 200
 
+    @field_validator("DEBUG", mode="before")
+    @classmethod
+    def parse_debug_value(cls, value: object) -> object:
+        if isinstance(value, bool) or value is None:
+            return value
+
+        normalized = str(value).strip().lower()
+        if normalized in {"1", "true", "yes", "on", "debug", "development"}:
+            return True
+        if normalized in {"0", "false", "no", "off", "release", "prod", "production"}:
+            return False
+        return value
+
     @model_validator(mode="after")
     def set_refresh_cookie_secure_default(self) -> Settings:
+        if not self.JWT_SECRET:
+            if self.APP_ENV == "development":
+                self.JWT_SECRET = "dev-jwt-secret"
+            else:
+                raise ValueError("JWT_SECRET is required")
         if self.REFRESH_COOKIE_SECURE is None:
             self.REFRESH_COOKIE_SECURE = self.APP_ENV != "development"
         return self
 
 
 settings = Settings()
-
-if not settings.JWT_SECRET:
-    raise ValueError("JWT_SECRET is required")
 
 
 TORTOISE_ORM = {

@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import json
+import re
 from contextlib import asynccontextmanager
+from dataclasses import is_dataclass
+from typing import Any
 
 from app.game.board import BOARD, TileType
 from app.game.enums import PlayerState
-from app.game.schemas import GameState, PlayerGameState, TileGameState
+from app.game.models import GameState, PlayerGameState, TileGameState
 from app.redis_client import get_redis
 
 GAME_STATE_TTL = 86400
 GAME_LOCK_TIMEOUT = 5
-INITIAL_BALANCE = 5000  # 내부 저장 단위. 표시: 5000 * 100만원 = 50억
+INITIAL_BALANCE = 5000
 
 
 def _game_key(game_id: str) -> str:
@@ -43,31 +46,31 @@ async def game_lock(game_id: str):
 def _make_initial_players(
     player_ids: list[int],
     nicknames: dict[int, str],
-) -> dict[str, PlayerGameState]:
-    players: dict[str, PlayerGameState] = {}
+) -> dict[int, PlayerGameState]:
+    players: dict[int, PlayerGameState] = {}
     for order, uid in enumerate(player_ids):
-        players[str(uid)] = PlayerGameState(
-            playerId=uid,
+        players[uid] = PlayerGameState(
+            player_id=uid,
             nickname=nicknames.get(uid, "Unknown"),
             balance=INITIAL_BALANCE,
-            currentTileId=0,
-            playerState=PlayerState.NORMAL,
-            stateDuration=0,
-            consecutiveDoubles=0,
-            ownedTiles=[],
-            buildingLevels={},
-            turnOrder=order,
+            current_tile_id=0,
+            player_state=PlayerState.NORMAL,
+            state_duration=0,
+            consecutive_doubles=0,
+            owned_tiles=[],
+            building_levels={},
+            turn_order=order,
         )
     return players
 
 
-def _make_initial_tiles() -> dict[str, TileGameState]:
-    tiles: dict[str, TileGameState] = {}
+def _make_initial_tiles() -> dict[int, TileGameState]:
+    tiles: dict[int, TileGameState] = {}
     for tile in BOARD:
         if tile.tile_type == TileType.PROPERTY:
-            tiles[str(tile.tile_id)] = TileGameState(
-                ownerId=None,
-                buildingLevel=0,
+            tiles[tile.tile_id] = TileGameState(
+                owner_id=None,
+                building_level=0,
             )
     return tiles
 
@@ -90,26 +93,24 @@ async def init_game_state(
         players=_make_initial_players(player_ids, nicknames),
         tiles=_make_initial_tiles(),
         pending_prompt=None,
-        winnerId=None,
+        winner_id=None,
     )
     redis = get_redis()
-    await redis.set(_game_key(game_id), json.dumps(state), ex=GAME_STATE_TTL)
+    await redis.set(_game_key(game_id), json.dumps(state.to_json()), ex=GAME_STATE_TTL)
     return state
 
 
 async def get_game_state(game_id: str) -> GameState | None:
-    """Redis에서 게임 상태를 읽어온다. 없으면 None."""
     redis = get_redis()
     raw = await redis.get(_game_key(game_id))
     if raw is None:
         return None
-    return json.loads(raw)
+    return GameState.from_json(json.loads(raw))
 
 
 async def save_game_state(game_id: str, state: GameState) -> None:
-    """수정된 게임 상태를 Redis에 다시 저장한다."""
     redis = get_redis()
-    await redis.set(_game_key(game_id), json.dumps(state), ex=GAME_STATE_TTL)
+    await redis.set(_game_key(game_id), json.dumps(state.to_json()), ex=GAME_STATE_TTL)
 
 
 async def delete_game_state(game_id: str) -> None:
@@ -118,11 +119,56 @@ async def delete_game_state(game_id: str) -> None:
 
 
 def get_tile_state(state: GameState, tile_id: int) -> TileGameState | None:
-    return state["tiles"].get(str(tile_id))
+    return state.tile(tile_id)
 
 
 def get_player_state(state: GameState, user_id: int) -> PlayerGameState | None:
-    return state["players"].get(str(user_id))
+    return state.player(user_id)
+
+
+def _normalize_path_segment(segment: str) -> str:
+    if segment.isdigit():
+        return segment
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", segment).lower()
+
+
+def _coerce_mapping_key(target: dict[Any, Any], key: str) -> Any:
+    if key in target:
+        return key
+    if key.isdigit():
+        numeric_key = int(key)
+        if numeric_key in target or not target:
+            return numeric_key
+    return key
+
+
+def _get_child(target: Any, key: str) -> Any:
+    normalized = _normalize_path_segment(key)
+
+    if is_dataclass(target):
+        return getattr(target, normalized)
+    if isinstance(target, dict):
+        return target[_coerce_mapping_key(target, normalized)]
+    if isinstance(target, list):
+        return target[int(normalized)]
+
+    raise TypeError(f"Unsupported patch target: {type(target)!r}")
+
+
+def _set_child(target: Any, key: str, value: Any) -> None:
+    normalized = _normalize_path_segment(key)
+
+    if is_dataclass(target):
+        setattr(target, normalized, value)
+        return
+    if isinstance(target, dict):
+        target[_coerce_mapping_key(target, normalized)] = value
+        return
+    if isinstance(target, list):
+        target[int(normalized)] = value
+        return
+
+    raise TypeError(f"Unsupported patch target: {type(target)!r}")
 
 
 def apply_patches(state: GameState, patches: list[dict]) -> None:
@@ -132,20 +178,26 @@ def apply_patches(state: GameState, patches: list[dict]) -> None:
         value = patch["value"]
 
         keys = path.split(".")
-        target = state
+        target: Any = state
         for key in keys[:-1]:
-            target = target[key]  # type: ignore[index]
+            target = _get_child(target, key)
 
         last_key = keys[-1]
 
         if op == "set":
-            target[last_key] = value  # type: ignore[index]
-        elif op == "inc":
-            target[last_key] = target[last_key] + value  # type: ignore[index]
+            _set_child(target, last_key, value)
+            continue
+
+        current_value = _get_child(target, last_key)
+
+        if op == "inc":
+            _set_child(target, last_key, current_value + value)
         elif op == "push":
-            target[last_key].append(value)  # type: ignore[index]
+            current_value.append(value)
         elif op == "remove":
-            if isinstance(target[last_key], list):  # type: ignore[index]
-                target[last_key].remove(value)  # type: ignore[index]
+            if isinstance(current_value, list):
+                current_value.remove(value)
+            elif isinstance(current_value, dict):
+                current_value.pop(_coerce_mapping_key(current_value, str(value)), None)
             else:
-                del target[last_key]  # type: ignore[index]
+                raise TypeError(f"Remove is unsupported for target: {path}")
