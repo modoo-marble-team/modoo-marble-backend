@@ -154,10 +154,10 @@ async def start_room_game(
         user_id=auth.user_id,
     )
     await _emit_lobby_updated(request, "status_changed", room)
-    start_turn_timer(game_state["game_id"], request.app.state.sio)
+    start_turn_timer(game_state.game_id, request.app.state.sio)
 
     payload = {
-        "game_id": game_state["game_id"],
+        "game_id": game_state.game_id,
         "room_id": room_id,
         "game_state": serialize_game_snapshot(game_state),
     }
@@ -167,4 +167,4 @@ async def start_room_game(
             "game_start", payload, room=f"user:{player['id']}"
         )
 
-    return {"success": True, "game_id": game_state["game_id"]}
+    return {"success": True, "game_id": game_state.game_id}

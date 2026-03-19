@@ -144,6 +144,57 @@ async def test_build_and_store_patch_packet_preserves_patch_ops(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_handle_sync_includes_snapshot_for_initial_revision_zero(monkeypatch):
+    sio = FakeSio()
+    runtime = GameSyncRuntime(sio)
+    state = make_state()
+
+    async def fake_get_game_state(_game_id: str) -> GameState:
+        return state
+
+    async def fake_update_status(*, user_id: str, status: str) -> None:
+        return None
+
+    async def fake_set_active_game(*, user_id: int, game_id: str) -> None:
+        return None
+
+    async def fake_get_disconnected_at(*, game_id: str, player_id: int):
+        return None
+
+    async def fake_clear_disconnected_at(*, game_id: str, player_id: int) -> None:
+        return None
+
+    async def fake_emit_reconnected_if_needed(**_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr("app.game.sync_runtime.get_game_state", fake_get_game_state)
+    monkeypatch.setattr("app.game.sync_runtime.update_status", fake_update_status)
+    monkeypatch.setattr(runtime, "set_active_game", fake_set_active_game)
+    monkeypatch.setattr(runtime, "get_disconnected_at", fake_get_disconnected_at)
+    monkeypatch.setattr(runtime, "clear_disconnected_at", fake_clear_disconnected_at)
+    monkeypatch.setattr(
+        runtime,
+        "_emit_reconnected_if_needed",
+        fake_emit_reconnected_if_needed,
+    )
+
+    synced_state = await runtime.handle_sync(
+        sid="sid-1",
+        user_id=1,
+        game_id="game-1",
+        known_revision=0,
+    )
+
+    assert synced_state is state
+    patch_events = [item for item in sio.emitted if item["event"] == "game:patch"]
+    assert len(patch_events) == 1
+    assert patch_events[0]["to"] == "sid-1"
+    assert patch_events[0]["data"]["revision"] == 0
+    assert patch_events[0]["data"]["snapshot"] is not None
+    assert patch_events[0]["data"]["snapshot"]["gameId"] == "game-1"
+
+
+@pytest.mark.asyncio
 async def test_game_action_joins_game_room_before_broadcast(monkeypatch):
     sio = FakeSio()
     runtime = FakeRuntime()
