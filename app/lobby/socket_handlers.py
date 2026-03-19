@@ -53,6 +53,43 @@ def register_lobby_handlers(
             await sio.leave_room(sid, f"room:{room_id}")
         if user_id is not None:
             await update_status(user_id=str(user_id), status="lobby")
+            if room_id:
+                try:
+                    room, new_host_id = await room_service.leave_room(
+                        room_id=room_id,
+                        user_id=user_id,
+                    )
+                    if room is None:
+                        await sio.emit(
+                            "lobby_updated",
+                            {"action": "removed", "room": {"id": room_id}},
+                        )
+                    else:
+                        await sio.emit(
+                            "lobby_updated",
+                            {"action": "updated", "room": room_service.room_card(room)},
+                        )
+                        await sio.emit(
+                            "room_updated",
+                            room_service.room_snapshot(room),
+                            room=f"room:{room_id}",
+                        )
+                        if new_host_id:
+                            new_host = next(
+                                (p for p in room["players"] if p["id"] == new_host_id),
+                                None,
+                            )
+                            if new_host:
+                                await sio.emit(
+                                    "host_changed",
+                                    {
+                                        "new_host_id": new_host_id,
+                                        "new_host_nickname": new_host["nickname"],
+                                    },
+                                    room=f"room:{room_id}",
+                                )
+                except Exception:
+                    pass
 
     @sio.on("send_chat")
     async def send_chat(sid: str, data: dict) -> None:

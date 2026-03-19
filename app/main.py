@@ -25,6 +25,7 @@ from app.models.user import User
 from app.presence import set_offline, set_online
 from app.redis_client import close_redis, get_redis, init_redis
 from app.routers import auth, game, lobby, users
+from app.services.room_service import RoomService
 from app.utils.jwt import decode_token
 
 logger = structlog.get_logger()
@@ -101,12 +102,58 @@ async def disconnect(sid: str):
 
             await handle_game_socket_disconnect(sid=sid, user_id=int(user_id))
             await _handle_game_disconnect(int(user_id))
+            await _handle_room_disconnect(int(user_id))
             await set_offline(user_id=str(user_id))
             await _broadcast_user_status(int(user_id), nickname, "offline")
     except Exception:
         pass
     finally:
         _sid_to_user.pop(sid, None)
+
+
+async def _handle_room_disconnect(user_id: int) -> None:
+    try:
+        redis = get_redis()
+        room_id = await redis.get(f"user:{user_id}:room")
+        if not room_id:
+            return
+
+        room_service = RoomService()
+        room, new_host_id = await room_service.leave_room(
+            room_id=room_id,
+            user_id=user_id,
+        )
+
+        if room is None:
+            await sio.emit(
+                "lobby_updated",
+                {"action": "removed", "room": {"id": room_id}},
+            )
+        else:
+            await sio.emit(
+                "lobby_updated",
+                {"action": "updated", "room": room_service.room_card(room)},
+            )
+            await sio.emit(
+                "room_updated",
+                room_service.room_snapshot(room),
+                room=f"room:{room_id}",
+            )
+            if new_host_id:
+                new_host = next(
+                    (p for p in room["players"] if p["id"] == new_host_id), None
+                )
+                if new_host:
+                    await sio.emit(
+                        "host_changed",
+                        {
+                            "new_host_id": new_host_id,
+                            "new_host_nickname": new_host["nickname"],
+                        },
+                        room=f"room:{room_id}",
+                    )
+    except Exception:
+        pass
 
 
 async def _handle_game_disconnect(user_id: int) -> None:
