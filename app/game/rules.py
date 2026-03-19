@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import copy
 import random
 from uuid import uuid4
 
 from app.game.board import BOARD_SIZE, ISLAND_TILE_ID, START_SALARY, TILE_MAP, TileType
 from app.game.enums import PlayerState, ServerEventType
 from app.game.errors import GameActionError
-from app.game.schemas import GameState, PendingPrompt, PromptChoice
+from app.game.models import GameState, PendingPrompt, PromptChoice
+from app.game.patch import op_inc, op_push, op_remove, op_set
 from app.game.state import apply_patches
 
 PHASE_WAIT_ROLL = "WAIT_ROLL"
@@ -15,10 +15,9 @@ PHASE_RESOLVING = "RESOLVING"
 PHASE_WAIT_PROMPT = "WAIT_PROMPT"
 PHASE_GAME_OVER = "GAME_OVER"
 
-# 건물 매각 환불 비율 — 건축 비용 대비
-SELL_REFUND_RATE_TIER_1_3 = 0.5  # 레벨 1~3: 건축 비용의 50% 환불
-SELL_REFUND_RATE_TIER_4_5 = 1.0  # 레벨 4~5: 건축 비용의 100% 환불
-SELL_REFUND_MULTIPLIER_TIER_6 = 2  # 레벨 6: 건축 비용의 200% 환불
+SELL_REFUND_RATE_TIER_1_3 = 0.5
+SELL_REFUND_RATE_TIER_4_5 = 1.0
+SELL_REFUND_MULTIPLIER_TIER_6 = 2
 
 PROMPT_TIMEOUT_SECONDS = 30
 
@@ -39,36 +38,24 @@ CHANCE_EFFECTS: dict[int, tuple[str, int]] = {
 EVENT_EFFECT_AMOUNT = 200
 
 CHANCE_CARD_POOL: list[dict] = [
-    {
-        "type": "GAIN_MONEY",
-        "amount": 300,
-        "description": "복권에 당첨되었습니다! 300만원 획득!",
-    },
-    {"type": "GAIN_MONEY", "amount": 200, "description": "세금 환급! 200만원 획득!"},
-    {"type": "GAIN_MONEY", "amount": 500, "description": "보너스 지급! 500만원 획득!"},
-    {"type": "LOSE_MONEY", "amount": 150, "description": "교통 벌금! 150만원 납부!"},
-    {"type": "LOSE_MONEY", "amount": 200, "description": "병원비 지출! 200만원 납부!"},
-    {"type": "LOSE_MONEY", "amount": 300, "description": "세금 납부! 300만원 납부!"},
-    {"type": "MOVE_FORWARD", "amount": 3, "description": "앞으로 3칸 전진!"},
-    {"type": "MOVE_FORWARD", "amount": 5, "description": "앞으로 5칸 전진!"},
-    {"type": "MOVE_BACKWARD", "amount": 2, "description": "뒤로 2칸 후퇴!"},
-    {"type": "MOVE_BACKWARD", "amount": 3, "description": "뒤로 3칸 후퇴!"},
-    {
-        "type": "STEAL_PROPERTY",
-        "amount": 0,
-        "description": "상대방의 땅을 하나 빼앗습니다!",
-    },
-    {
-        "type": "GIVE_PROPERTY",
-        "amount": 0,
-        "description": "소유한 땅 하나를 빼앗겼습니다!",
-    },
+    {"type": "GAIN_MONEY", "amount": 300, "description": "보너스 300만원을 획득합니다."},
+    {"type": "GAIN_MONEY", "amount": 200, "description": "보너스 200만원을 획득합니다."},
+    {"type": "GAIN_MONEY", "amount": 500, "description": "보너스 500만원을 획득합니다."},
+    {"type": "LOSE_MONEY", "amount": 150, "description": "150만원을 지불합니다."},
+    {"type": "LOSE_MONEY", "amount": 200, "description": "200만원을 지불합니다."},
+    {"type": "LOSE_MONEY", "amount": 300, "description": "300만원을 지불합니다."},
+    {"type": "MOVE_FORWARD", "amount": 3, "description": "앞으로 3칸 이동합니다."},
+    {"type": "MOVE_FORWARD", "amount": 5, "description": "앞으로 5칸 이동합니다."},
+    {"type": "MOVE_BACKWARD", "amount": 2, "description": "뒤로 2칸 이동합니다."},
+    {"type": "MOVE_BACKWARD", "amount": 3, "description": "뒤로 3칸 이동합니다."},
+    {"type": "STEAL_PROPERTY", "amount": 0, "description": "상대의 땅 하나를 가져옵니다."},
+    {"type": "GIVE_PROPERTY", "amount": 0, "description": "내 땅 하나를 넘겨줍니다."},
 ]
 
 EVENT_CARD_POOL: list[dict] = [
-    {"type": "GAIN_MONEY", "amount": 200, "description": "축하금 200만원 수령!"},
-    {"type": "GAIN_MONEY", "amount": 100, "description": "용돈 100만원 수령!"},
-    {"type": "LOSE_MONEY", "amount": 100, "description": "기부금 100만원 납부!"},
+    {"type": "GAIN_MONEY", "amount": 200, "description": "축하금 200만원을 받습니다."},
+    {"type": "GAIN_MONEY", "amount": 100, "description": "지원금 100만원을 받습니다."},
+    {"type": "LOSE_MONEY", "amount": 100, "description": "벌금 100만원을 냅니다."},
 ]
 
 
@@ -77,15 +64,15 @@ def serialize_prompt(prompt: PendingPrompt | None) -> dict | None:
         return None
 
     return {
-        "id": prompt["prompt_id"],
-        "promptId": prompt["prompt_id"],
-        "type": prompt["type"],
-        "playerId": str(prompt["player_id"]),
-        "title": prompt["title"],
-        "message": prompt["message"],
-        "timeoutSec": prompt["timeout_sec"],
-        "choices": prompt["choices"],
-        "payload": prompt["payload"],
+        "id": prompt.prompt_id,
+        "promptId": prompt.prompt_id,
+        "type": prompt.type,
+        "playerId": str(prompt.player_id),
+        "title": prompt.title,
+        "message": prompt.message,
+        "timeoutSec": prompt.timeout_sec,
+        "choices": [choice.to_json() for choice in prompt.choices],
+        "payload": prompt.payload,
     }
 
 
@@ -98,19 +85,19 @@ def normalize_prompt_choice(choice: str) -> str:
 
 
 def default_prompt_choice(prompt: PendingPrompt) -> str:
-    return prompt.get("default_choice", prompt["choices"][0]["value"])
+    return prompt.default_choice or prompt.choices[0].value
 
 
 def clear_prompt_patches(*, next_phase: str = PHASE_RESOLVING) -> list[dict]:
     return [
-        {"op": "set", "path": "pending_prompt", "value": None},
-        {"op": "set", "path": "phase", "value": next_phase},
+        op_set("pending_prompt", None),
+        op_set("phase", next_phase),
     ]
 
 
 def _player_name(state: GameState, player_id: int) -> str:
-    player = state["players"].get(str(player_id))
-    return player["nickname"] if player else f"Player {player_id}"
+    player = state.player(player_id)
+    return player.nickname if player else f"Player {player_id}"
 
 
 def _make_prompt(
@@ -137,32 +124,26 @@ def _make_prompt(
 
 
 def _owned_tile_patches(state: GameState, player_id: int, tile_id: int) -> list[dict]:
-    player = state["players"][str(player_id)]
-    if tile_id in player["ownedTiles"]:
+    player = state.require_player(player_id)
+    if tile_id in player.owned_tiles:
         return []
-    return [{"op": "push", "path": f"players.{player_id}.ownedTiles", "value": tile_id}]
+    return [op_push(f"players.{player_id}.owned_tiles", tile_id)]
 
 
 def _bankrupt_player_patches(state: GameState, player_id: int) -> list[dict]:
-    player = state["players"][str(player_id)]
+    player = state.require_player(player_id)
     patches = [
-        {"op": "set", "path": f"players.{player_id}.balance", "value": 0},
-        {
-            "op": "set",
-            "path": f"players.{player_id}.playerState",
-            "value": PlayerState.BANKRUPT,
-        },
-        {"op": "set", "path": f"players.{player_id}.stateDuration", "value": 0},
-        {"op": "set", "path": f"players.{player_id}.consecutiveDoubles", "value": 0},
-        {"op": "set", "path": f"players.{player_id}.ownedTiles", "value": []},
-        {"op": "set", "path": f"players.{player_id}.buildingLevels", "value": {}},
+        op_set(f"players.{player_id}.balance", 0),
+        op_set(f"players.{player_id}.player_state", PlayerState.BANKRUPT),
+        op_set(f"players.{player_id}.state_duration", 0),
+        op_set(f"players.{player_id}.consecutive_doubles", 0),
+        op_set(f"players.{player_id}.owned_tiles", []),
+        op_set(f"players.{player_id}.building_levels", {}),
     ]
 
-    for tile_id in player["ownedTiles"]:
-        patches.append({"op": "set", "path": f"tiles.{tile_id}.ownerId", "value": None})
-        patches.append(
-            {"op": "set", "path": f"tiles.{tile_id}.buildingLevel", "value": 0}
-        )
+    for owned_tile_id in player.owned_tiles:
+        patches.append(op_set(f"tiles.{owned_tile_id}.owner_id", None))
+        patches.append(op_set(f"tiles.{owned_tile_id}.building_level", 0))
 
     return patches
 
@@ -184,15 +165,13 @@ def _apply_money_delta(
     player_id: int,
     amount: int,
 ) -> tuple[list[dict], list[dict]]:
-    player = state["players"][str(player_id)]
-    next_balance = player["balance"] + amount
+    player = state.require_player(player_id)
+    next_balance = player.balance + amount
     if next_balance > 0:
-        return [
-            {"op": "inc", "path": f"players.{player_id}.balance", "value": amount}
-        ], []
+        return [op_inc(f"players.{player_id}.balance", amount)], []
 
     return _bankrupt_player_patches(state, player_id), _bankrupt_player_events(
-        player_id
+        player_id,
     )
 
 
@@ -221,7 +200,9 @@ def _get_sell_refund(tile_id: int, building_level: int) -> int:
 
 
 def _apply_chance_card(
-    state: GameState, player_id: int, card: dict
+    state: GameState,
+    player_id: int,
+    card: dict,
 ) -> tuple[list[dict], list[dict]]:
     chance_type = card["type"]
     amount = card.get("amount", 0)
@@ -230,30 +211,28 @@ def _apply_chance_card(
 
     if chance_type == "GAIN_MONEY":
         money_patches, money_events = _apply_money_delta(
-            state, player_id=player_id, amount=amount
+            state,
+            player_id=player_id,
+            amount=amount,
         )
         patches.extend(money_patches)
         events.extend(money_events)
 
     elif chance_type == "LOSE_MONEY":
         money_patches, money_events = _apply_money_delta(
-            state, player_id=player_id, amount=-amount
+            state,
+            player_id=player_id,
+            amount=-amount,
         )
         patches.extend(money_patches)
         events.extend(money_events)
 
     elif chance_type == "MOVE_FORWARD":
-        player = state["players"][str(player_id)]
-        from_tile = player["currentTileId"]
+        player = state.require_player(player_id)
+        from_tile = player.current_tile_id
         to_tile = (from_tile + amount) % BOARD_SIZE
         passed_start = from_tile + amount >= BOARD_SIZE
-        patches.append(
-            {
-                "op": "set",
-                "path": f"players.{player_id}.currentTileId",
-                "value": to_tile,
-            }
-        )
+        patches.append(op_set(f"players.{player_id}.current_tile_id", to_tile))
         events.append(
             {
                 "type": ServerEventType.PLAYER_MOVED,
@@ -265,25 +244,13 @@ def _apply_chance_card(
             }
         )
         if passed_start:
-            patches.append(
-                {
-                    "op": "inc",
-                    "path": f"players.{player_id}.balance",
-                    "value": START_SALARY,
-                }
-            )
+            patches.append(op_inc(f"players.{player_id}.balance", START_SALARY))
 
     elif chance_type == "MOVE_BACKWARD":
-        player = state["players"][str(player_id)]
-        from_tile = player["currentTileId"]
+        player = state.require_player(player_id)
+        from_tile = player.current_tile_id
         to_tile = (from_tile - amount) % BOARD_SIZE
-        patches.append(
-            {
-                "op": "set",
-                "path": f"players.{player_id}.currentTileId",
-                "value": to_tile,
-            }
-        )
+        patches.append(op_set(f"players.{player_id}.current_tile_id", to_tile))
         events.append(
             {
                 "type": ServerEventType.PLAYER_MOVED,
@@ -297,48 +264,23 @@ def _apply_chance_card(
 
     elif chance_type == "STEAL_PROPERTY":
         other_players = [
-            (pid, p)
-            for pid, p in state["players"].items()
-            if int(pid) != player_id
-            and p["playerState"] != PlayerState.BANKRUPT
-            and p["ownedTiles"]
+            (candidate_id, candidate)
+            for candidate_id, candidate in state.players.items()
+            if candidate_id != player_id
+            and not candidate.is_bankrupt
+            and candidate.owned_tiles
         ]
         if other_players:
-            target_pid, target_player = random.choice(other_players)
-            stolen_tile_id = random.choice(target_player["ownedTiles"])
-            target_id = int(target_pid)
+            target_id, target_player = random.choice(other_players)
+            stolen_tile_id = random.choice(target_player.owned_tiles)
             patches.extend(
                 [
-                    {
-                        "op": "set",
-                        "path": f"tiles.{stolen_tile_id}.ownerId",
-                        "value": player_id,
-                    },
-                    {
-                        "op": "set",
-                        "path": f"tiles.{stolen_tile_id}.buildingLevel",
-                        "value": 0,
-                    },
-                    {
-                        "op": "remove",
-                        "path": f"players.{target_id}.ownedTiles",
-                        "value": stolen_tile_id,
-                    },
-                    {
-                        "op": "remove",
-                        "path": f"players.{target_id}.buildingLevels",
-                        "value": str(stolen_tile_id),
-                    },
-                    {
-                        "op": "push",
-                        "path": f"players.{player_id}.ownedTiles",
-                        "value": stolen_tile_id,
-                    },
-                    {
-                        "op": "set",
-                        "path": f"players.{player_id}.buildingLevels.{stolen_tile_id}",
-                        "value": 0,
-                    },
+                    op_set(f"tiles.{stolen_tile_id}.owner_id", player_id),
+                    op_set(f"tiles.{stolen_tile_id}.building_level", 0),
+                    op_remove(f"players.{target_id}.owned_tiles", stolen_tile_id),
+                    op_remove(f"players.{target_id}.building_levels", stolen_tile_id),
+                    op_push(f"players.{player_id}.owned_tiles", stolen_tile_id),
+                    op_set(f"players.{player_id}.building_levels.{stolen_tile_id}", 0),
                 ]
             )
             events.append(
@@ -354,48 +296,27 @@ def _apply_chance_card(
             )
 
     elif chance_type == "GIVE_PROPERTY":
-        player = state["players"][str(player_id)]
-        if player["ownedTiles"]:
-            other_alive = [
-                pid
-                for pid, p in state["players"].items()
-                if int(pid) != player_id and p["playerState"] != PlayerState.BANKRUPT
+        player = state.require_player(player_id)
+        if player.owned_tiles:
+            receivers = [
+                candidate_id
+                for candidate_id, candidate in state.players.items()
+                if candidate_id != player_id and not candidate.is_bankrupt
             ]
-            if other_alive:
-                given_tile_id = random.choice(player["ownedTiles"])
-                receiver_id = int(random.choice(other_alive))
+            if receivers:
+                given_tile_id = random.choice(player.owned_tiles)
+                receiver_id = int(random.choice(receivers))
                 patches.extend(
                     [
-                        {
-                            "op": "set",
-                            "path": f"tiles.{given_tile_id}.ownerId",
-                            "value": receiver_id,
-                        },
-                        {
-                            "op": "set",
-                            "path": f"tiles.{given_tile_id}.buildingLevel",
-                            "value": 0,
-                        },
-                        {
-                            "op": "remove",
-                            "path": f"players.{player_id}.ownedTiles",
-                            "value": given_tile_id,
-                        },
-                        {
-                            "op": "remove",
-                            "path": f"players.{player_id}.buildingLevels",
-                            "value": str(given_tile_id),
-                        },
-                        {
-                            "op": "push",
-                            "path": f"players.{receiver_id}.ownedTiles",
-                            "value": given_tile_id,
-                        },
-                        {
-                            "op": "set",
-                            "path": f"players.{receiver_id}.buildingLevels.{given_tile_id}",
-                            "value": 0,
-                        },
+                        op_set(f"tiles.{given_tile_id}.owner_id", receiver_id),
+                        op_set(f"tiles.{given_tile_id}.building_level", 0),
+                        op_remove(f"players.{player_id}.owned_tiles", given_tile_id),
+                        op_remove(f"players.{player_id}.building_levels", given_tile_id),
+                        op_push(f"players.{receiver_id}.owned_tiles", given_tile_id),
+                        op_set(
+                            f"players.{receiver_id}.building_levels.{given_tile_id}",
+                            0,
+                        ),
                     ]
                 )
                 events.append(
@@ -431,33 +352,28 @@ def _append_landed_event(events: list[dict], *, player_id: int, tile_id: int) ->
 
 
 def _apply_purchase(
-    state: GameState, *, player_id: int, tile_id: int
+    state: GameState,
+    *,
+    player_id: int,
+    tile_id: int,
 ) -> tuple[list[dict], list[dict]]:
     tile_def = TILE_MAP.get(tile_id)
-    tile_state = state["tiles"].get(str(tile_id))
-    if (
-        tile_def is None
-        or tile_state is None
-        or tile_def.tile_type != TileType.PROPERTY
-    ):
-        raise GameActionError(code="INVALID_TILE", message="Cannot buy this tile.")
+    tile_state = state.tile(tile_id)
+    if tile_def is None or tile_state is None or tile_def.tile_type != TileType.PROPERTY:
+        raise GameActionError(code="INVALID_TILE", message="구매할 수 없는 칸입니다.")
 
-    if tile_state["ownerId"] is not None:
-        raise GameActionError(code="INVALID_PHASE", message="Tile is already owned.")
+    if tile_state.owner_id is not None:
+        raise GameActionError(code="INVALID_PHASE", message="이미 소유자가 있는 칸입니다.")
 
-    player = state["players"][str(player_id)]
-    if player["balance"] < tile_def.price:
-        raise GameActionError(code="INSUFFICIENT_FUNDS", message="Not enough funds.")
+    player = state.require_player(player_id)
+    if player.balance < tile_def.price:
+        raise GameActionError(code="INSUFFICIENT_FUNDS", message="보유 금액이 부족합니다.")
 
     patches = [
-        {"op": "inc", "path": f"players.{player_id}.balance", "value": -tile_def.price},
-        {"op": "set", "path": f"tiles.{tile_id}.ownerId", "value": player_id},
-        {"op": "set", "path": f"tiles.{tile_id}.buildingLevel", "value": 0},
-        {
-            "op": "set",
-            "path": f"players.{player_id}.buildingLevels.{tile_id}",
-            "value": 0,
-        },
+        op_inc(f"players.{player_id}.balance", -tile_def.price),
+        op_set(f"tiles.{tile_id}.owner_id", player_id),
+        op_set(f"tiles.{tile_id}.building_level", 0),
+        op_set(f"players.{player_id}.building_levels.{tile_id}", 0),
     ]
     patches.extend(_owned_tile_patches(state, player_id, tile_id))
     return [
@@ -471,30 +387,30 @@ def _apply_purchase(
 
 
 def _apply_build(
-    state: GameState, *, player_id: int, tile_id: int
+    state: GameState,
+    *,
+    player_id: int,
+    tile_id: int,
 ) -> tuple[list[dict], list[dict]]:
     tile_def = TILE_MAP.get(tile_id)
-    tile_state = state["tiles"].get(str(tile_id))
-    if (
-        tile_def is None
-        or tile_state is None
-        or tile_def.tile_type != TileType.PROPERTY
-    ):
-        raise GameActionError(code="INVALID_TILE", message="Cannot build on this tile.")
+    tile_state = state.tile(tile_id)
+    if tile_def is None or tile_state is None or tile_def.tile_type != TileType.PROPERTY:
+        raise GameActionError(code="INVALID_TILE", message="건설할 수 없는 칸입니다.")
 
-    if tile_state["ownerId"] != player_id:
-        raise GameActionError(code="NOT_OWNER", message="You do not own this tile.")
+    if tile_state.owner_id != player_id:
+        raise GameActionError(code="NOT_OWNER", message="내 소유의 칸이 아닙니다.")
 
-    current_level = tile_state["buildingLevel"]
+    current_level = tile_state.building_level
     if current_level >= 7:
         raise GameActionError(
-            code="INVALID_PHASE", message="This tile is already maxed out."
+            code="INVALID_PHASE",
+            message="이미 최대 단계까지 건설된 칸입니다.",
         )
 
     build_cost = tile_def.build_costs[current_level + 1]
-    player = state["players"][str(player_id)]
-    if player["balance"] < build_cost:
-        raise GameActionError(code="INSUFFICIENT_FUNDS", message="Not enough funds.")
+    player = state.require_player(player_id)
+    if player.balance < build_cost:
+        raise GameActionError(code="INSUFFICIENT_FUNDS", message="보유 금액이 부족합니다.")
 
     next_level = current_level + 1
     return [
@@ -506,40 +422,37 @@ def _apply_build(
             "buildingLevel": next_level,
         }
     ], [
-        {"op": "inc", "path": f"players.{player_id}.balance", "value": -build_cost},
-        {"op": "set", "path": f"tiles.{tile_id}.buildingLevel", "value": next_level},
-        {
-            "op": "set",
-            "path": f"players.{player_id}.buildingLevels.{tile_id}",
-            "value": next_level,
-        },
+        op_inc(f"players.{player_id}.balance", -build_cost),
+        op_set(f"tiles.{tile_id}.building_level", next_level),
+        op_set(f"players.{player_id}.building_levels.{tile_id}", next_level),
     ]
 
 
 def _apply_toll_payment(
-    state: GameState, *, player_id: int, tile_id: int
+    state: GameState,
+    *,
+    player_id: int,
+    tile_id: int,
 ) -> tuple[list[dict], list[dict]]:
     tile_def = TILE_MAP.get(tile_id)
-    tile_state = state["tiles"].get(str(tile_id))
-    if (
-        tile_def is None
-        or tile_state is None
-        or tile_def.tile_type != TileType.PROPERTY
-    ):
+    tile_state = state.tile(tile_id)
+    if tile_def is None or tile_state is None or tile_def.tile_type != TileType.PROPERTY:
         raise GameActionError(
-            code="INVALID_TILE", message="Cannot pay toll on this tile."
+            code="INVALID_TILE",
+            message="통행료를 지불할 수 없는 칸입니다.",
         )
 
-    owner_id = tile_state["ownerId"]
+    owner_id = tile_state.owner_id
     if owner_id is None or owner_id == player_id:
         raise GameActionError(
-            code="INVALID_PHASE", message="No toll target is available."
+            code="INVALID_PHASE",
+            message="통행료를 지불할 대상이 없습니다.",
         )
 
-    building_level = tile_state["buildingLevel"]
+    building_level = tile_state.building_level
     toll = _get_toll_amount(tile_id, building_level)
-    player = state["players"][str(player_id)]
-    payable_amount = min(player["balance"], toll)
+    player = state.require_player(player_id)
+    payable_amount = min(player.balance, toll)
     patches: list[dict] = []
     events: list[dict] = [
         {
@@ -552,18 +465,10 @@ def _apply_toll_payment(
     ]
 
     if payable_amount > 0:
-        patches.append(
-            {
-                "op": "inc",
-                "path": f"players.{owner_id}.balance",
-                "value": payable_amount,
-            }
-        )
+        patches.append(op_inc(f"players.{owner_id}.balance", payable_amount))
 
-    if player["balance"] >= toll:
-        patches.append(
-            {"op": "inc", "path": f"players.{player_id}.balance", "value": -toll}
-        )
+    if player.balance >= toll:
+        patches.append(op_inc(f"players.{player_id}.balance", -toll))
         return events, patches
 
     patches.extend(_bankrupt_player_patches(state, player_id))
@@ -577,24 +482,25 @@ def process_buy_property_action(
     player_id: int,
     tile_id: int,
 ) -> tuple[list[dict], list[dict]]:
-    if state["current_player_id"] != player_id:
-        raise GameActionError(code="NOT_YOUR_TURN", message="It is not your turn.")
-    if state["status"] != "playing" or state["phase"] != PHASE_WAIT_ROLL:
+    if state.current_player_id != player_id:
+        raise GameActionError(code="NOT_YOUR_TURN", message="내 턴이 아닙니다.")
+    if state.status != "playing" or state.phase != PHASE_WAIT_ROLL:
         raise GameActionError(
-            code="INVALID_PHASE", message="Cannot buy or build right now."
+            code="INVALID_PHASE",
+            message="지금은 구매 또는 건설을 할 수 없습니다.",
         )
 
-    tile_state = state["tiles"].get(str(tile_id))
+    tile_state = state.tile(tile_id)
     if tile_state is None:
-        raise GameActionError(code="INVALID_TILE", message="Cannot act on this tile.")
+        raise GameActionError(code="INVALID_TILE", message="이 칸에서는 해당 행동을 할 수 없습니다.")
 
-    owner_id = tile_state["ownerId"]
-    if owner_id is None:
+    if tile_state.owner_id is None:
         return _apply_purchase(state, player_id=player_id, tile_id=tile_id)
-    if owner_id == player_id:
+    if tile_state.owner_id == player_id:
         return _apply_build(state, player_id=player_id, tile_id=tile_id)
     raise GameActionError(
-        code="INVALID_PHASE", message="This tile belongs to another player."
+        code="INVALID_PHASE",
+        message="다른 플레이어의 소유 칸입니다.",
     )
 
 
@@ -605,24 +511,20 @@ def process_sell_property_action(
     tile_id: int,
     building_level: int | None,
 ) -> tuple[list[dict], list[dict]]:
-    if state["current_player_id"] != player_id:
-        raise GameActionError(code="NOT_YOUR_TURN", message="It is not your turn.")
-    if state["status"] != "playing" or state["phase"] != PHASE_WAIT_ROLL:
-        raise GameActionError(code="INVALID_PHASE", message="Cannot sell right now.")
+    if state.current_player_id != player_id:
+        raise GameActionError(code="NOT_YOUR_TURN", message="내 턴이 아닙니다.")
+    if state.status != "playing" or state.phase != PHASE_WAIT_ROLL:
+        raise GameActionError(code="INVALID_PHASE", message="지금은 매각할 수 없습니다.")
 
     tile_def = TILE_MAP.get(tile_id)
-    tile_state = state["tiles"].get(str(tile_id))
-    if (
-        tile_def is None
-        or tile_state is None
-        or tile_def.tile_type != TileType.PROPERTY
-    ):
-        raise GameActionError(code="INVALID_TILE", message="Cannot sell this tile.")
+    tile_state = state.tile(tile_id)
+    if tile_def is None or tile_state is None or tile_def.tile_type != TileType.PROPERTY:
+        raise GameActionError(code="INVALID_TILE", message="매각할 수 없는 칸입니다.")
 
-    if tile_state["ownerId"] != player_id:
-        raise GameActionError(code="NOT_OWNER", message="You do not own this tile.")
+    if tile_state.owner_id != player_id:
+        raise GameActionError(code="NOT_OWNER", message="내 소유의 칸이 아닙니다.")
 
-    current_level = tile_state["buildingLevel"]
+    current_level = tile_state.building_level
     requested_level = (
         current_level
         if building_level is None
@@ -633,8 +535,8 @@ def process_sell_property_action(
     release_ownership = next_level <= 0
 
     patches = [
-        {"op": "inc", "path": f"players.{player_id}.balance", "value": refund},
-        {"op": "set", "path": f"tiles.{tile_id}.buildingLevel", "value": next_level},
+        op_inc(f"players.{player_id}.balance", refund),
+        op_set(f"tiles.{tile_id}.building_level", next_level),
     ]
     events = [
         {
@@ -648,53 +550,41 @@ def process_sell_property_action(
     ]
 
     if release_ownership:
-        patches.append({"op": "set", "path": f"tiles.{tile_id}.ownerId", "value": None})
-        patches.append(
-            {
-                "op": "remove",
-                "path": f"players.{player_id}.ownedTiles",
-                "value": tile_id,
-            }
-        )
-        patches.append(
-            {
-                "op": "remove",
-                "path": f"players.{player_id}.buildingLevels",
-                "value": str(tile_id),
-            }
+        patches.extend(
+            [
+                op_set(f"tiles.{tile_id}.owner_id", None),
+                op_remove(f"players.{player_id}.owned_tiles", tile_id),
+                op_remove(f"players.{player_id}.building_levels", tile_id),
+            ]
         )
     else:
-        patches.append(
-            {
-                "op": "set",
-                "path": f"players.{player_id}.buildingLevels.{tile_id}",
-                "value": next_level,
-            }
-        )
+        patches.append(op_set(f"players.{player_id}.building_levels.{tile_id}", next_level))
 
     return events, patches
 
 
 def resolve_landing(
-    state: GameState, player_id: int, tile_id: int
+    state: GameState,
+    player_id: int,
+    tile_id: int,
 ) -> tuple[list[dict], list[dict]]:
     tile_def = TILE_MAP[tile_id]
-    tile_state = state["tiles"].get(str(tile_id))
+    tile_state = state.tile(tile_id)
     events: list[dict] = []
-    patches: list[dict] = [{"op": "set", "path": "phase", "value": PHASE_RESOLVING}]
+    patches: list[dict] = [op_set("phase", PHASE_RESOLVING)]
 
     if tile_def.tile_type == TileType.PROPERTY and tile_state is not None:
-        owner_id = tile_state["ownerId"]
-        building_level = tile_state["buildingLevel"]
+        owner_id = tile_state.owner_id
+        building_level = tile_state.building_level
         if owner_id is None:
             prompt = _make_prompt(
                 prompt_type="BUY_OR_SKIP",
                 player_id=player_id,
-                title=f"{tile_def.name} purchase",
-                message=f"Buy {tile_def.name} for {tile_def.price}만원?",
+                title=f"{tile_def.name} 구매",
+                message=f"{tile_def.name}을(를) {tile_def.price}만원에 구매하시겠습니까?",
                 choices=[
-                    {"id": "buy", "label": "구매", "value": "BUY"},
-                    {"id": "skip", "label": "건너뛰기", "value": "SKIP"},
+                    PromptChoice(id="buy", label="구매", value="BUY"),
+                    PromptChoice(id="skip", label="건너뛰기", value="SKIP"),
                 ],
                 payload={
                     "tileId": tile_id,
@@ -706,8 +596,8 @@ def resolve_landing(
             )
             patches.extend(
                 [
-                    {"op": "set", "path": "pending_prompt", "value": prompt},
-                    {"op": "set", "path": "phase", "value": PHASE_WAIT_PROMPT},
+                    op_set("pending_prompt", prompt),
+                    op_set("phase", PHASE_WAIT_PROMPT),
                 ]
             )
             return events, patches
@@ -718,11 +608,11 @@ def resolve_landing(
             prompt = _make_prompt(
                 prompt_type="BUILD_OR_SKIP",
                 player_id=player_id,
-                title=f"{tile_def.name} build",
-                message=f"Build on {tile_def.name} for {build_cost}만원?",
+                title=f"{tile_def.name} 건설",
+                message=f"{tile_def.name}에 {build_cost}만원을 내고 건설하시겠습니까?",
                 choices=[
-                    {"id": "build", "label": "건설", "value": "BUILD"},
-                    {"id": "skip", "label": "건너뛰기", "value": "SKIP"},
+                    PromptChoice(id="build", label="건설", value="BUILD"),
+                    PromptChoice(id="skip", label="건너뛰기", value="SKIP"),
                 ],
                 payload={
                     "tileId": tile_id,
@@ -736,8 +626,8 @@ def resolve_landing(
             )
             patches.extend(
                 [
-                    {"op": "set", "path": "pending_prompt", "value": prompt},
-                    {"op": "set", "path": "phase", "value": PHASE_WAIT_PROMPT},
+                    op_set("pending_prompt", prompt),
+                    op_set("phase", PHASE_WAIT_PROMPT),
                 ]
             )
             return events, patches
@@ -747,11 +637,9 @@ def resolve_landing(
             prompt = _make_prompt(
                 prompt_type="PAY_TOLL",
                 player_id=player_id,
-                title=f"{tile_def.name} toll",
-                message=f"Pay {_player_name(state, owner_id)} {toll}만원.",
-                choices=[
-                    {"id": "pay", "label": "확인", "value": "PAY_TOLL"},
-                ],
+                title=f"{tile_def.name} 통행료",
+                message=f"{_player_name(state, owner_id)}님에게 {toll}만원을 지불합니다.",
+                choices=[PromptChoice(id="pay", label="확인", value="PAY_TOLL")],
                 payload={
                     "tileId": tile_id,
                     "tileName": tile_def.name,
@@ -765,8 +653,8 @@ def resolve_landing(
             )
             patches.extend(
                 [
-                    {"op": "set", "path": "pending_prompt", "value": prompt},
-                    {"op": "set", "path": "phase", "value": PHASE_WAIT_PROMPT},
+                    op_set("pending_prompt", prompt),
+                    op_set("phase", PHASE_WAIT_PROMPT),
                 ]
             )
             return events, patches
@@ -774,22 +662,10 @@ def resolve_landing(
     if tile_def.tile_type == TileType.MOVE_TO_ISLAND:
         patches.extend(
             [
-                {
-                    "op": "set",
-                    "path": f"players.{player_id}.currentTileId",
-                    "value": ISLAND_TILE_ID,
-                },
-                {
-                    "op": "set",
-                    "path": f"players.{player_id}.playerState",
-                    "value": PlayerState.LOCKED,
-                },
-                {"op": "set", "path": f"players.{player_id}.stateDuration", "value": 3},
-                {
-                    "op": "set",
-                    "path": f"players.{player_id}.consecutiveDoubles",
-                    "value": 0,
-                },
+                op_set(f"players.{player_id}.current_tile_id", ISLAND_TILE_ID),
+                op_set(f"players.{player_id}.player_state", PlayerState.LOCKED),
+                op_set(f"players.{player_id}.state_duration", 3),
+                op_set(f"players.{player_id}.consecutive_doubles", 0),
             ]
         )
         events.extend(
@@ -815,22 +691,19 @@ def resolve_landing(
         prompt = _make_prompt(
             prompt_type="TRAVEL_SELECT",
             player_id=player_id,
-            title="국내여행",
-            message="이동할 칸을 선택하세요.",
+            title="여행",
+            message="이동할 목적지를 선택해주세요.",
             choices=[
-                {"id": "confirm", "label": "목적지 선택", "value": "CONFIRM"},
-                {"id": "skip", "label": "건너뛰기", "value": "SKIP"},
+                PromptChoice(id="confirm", label="선택", value="CONFIRM"),
+                PromptChoice(id="skip", label="건너뛰기", value="SKIP"),
             ],
-            payload={
-                "tileId": tile_id,
-                "tileName": tile_def.name,
-            },
+            payload={"tileId": tile_id, "tileName": tile_def.name},
             default_choice_value="SKIP",
         )
         patches.extend(
             [
-                {"op": "set", "path": "pending_prompt", "value": prompt},
-                {"op": "set", "path": "phase", "value": PHASE_WAIT_PROMPT},
+                op_set("pending_prompt", prompt),
+                op_set("phase", PHASE_WAIT_PROMPT),
             ]
         )
         return events, patches
@@ -860,7 +733,8 @@ def resolve_landing(
         patches.extend(card_patches)
         events.extend(card_events)
         if not any(
-            e.get("type") == ServerEventType.CHANCE_RESOLVED for e in card_events
+            event.get("type") == ServerEventType.CHANCE_RESOLVED
+            for event in card_events
         ):
             events.append(
                 {
@@ -882,10 +756,7 @@ def resolve_landing(
                 "type": ServerEventType.CHANCE_RESOLVED,
                 "playerId": player_id,
                 "tileId": tile_id,
-                "chance": {
-                    "type": "AI_SKIPPED",
-                    "power": 0,
-                },
+                "chance": {"type": "AI_SKIPPED", "power": 0},
             }
         )
         return events, patches
@@ -901,35 +772,38 @@ def process_prompt_response(
     choice: str,
     payload: dict | None = None,
 ) -> tuple[list[dict], list[dict]]:
-    prompt = state.get("pending_prompt")
-    if prompt is None or prompt["prompt_id"] != prompt_id:
+    prompt = state.pending_prompt
+    if prompt is None or prompt.prompt_id != prompt_id:
         raise GameActionError(
-            code="PROMPT_NOT_FOUND", message="No active prompt found."
+            code="PROMPT_NOT_FOUND",
+            message="진행 중인 프롬프트를 찾을 수 없습니다.",
         )
 
-    if state["phase"] != PHASE_WAIT_PROMPT:
+    if state.phase != PHASE_WAIT_PROMPT:
         raise GameActionError(
             code="INVALID_PHASE",
-            message="Prompt cannot be handled in the current phase.",
+            message="현재 단계에서는 프롬프트를 처리할 수 없습니다.",
         )
 
-    if prompt["player_id"] != player_id:
+    if prompt.player_id != player_id:
         raise GameActionError(
-            code="NOT_PROMPT_OWNER", message="You do not own this prompt."
+            code="NOT_PROMPT_OWNER",
+            message="해당 프롬프트의 응답 대상이 아닙니다.",
         )
 
     normalized_choice = normalize_prompt_choice(choice)
-    if normalized_choice not in prompt_allowed_choices(prompt["type"]):
+    if normalized_choice not in prompt_allowed_choices(prompt.type):
         raise GameActionError(
-            code="INVALID_PROMPT_CHOICE", message="Invalid prompt choice."
+            code="INVALID_PROMPT_CHOICE",
+            message="올바르지 않은 프롬프트 선택입니다.",
         )
 
     patches = clear_prompt_patches()
     events: list[dict] = []
-    tile_id = int(prompt["payload"].get("tileId", -1))
+    tile_id = int(prompt.payload.get("tileId", -1))
     response_payload = payload if isinstance(payload, dict) else {}
 
-    if prompt["type"] == "BUY_OR_SKIP" and normalized_choice == "BUY":
+    if prompt.type == "BUY_OR_SKIP" and normalized_choice == "BUY":
         action_events, action_patches = _apply_purchase(
             state,
             player_id=player_id,
@@ -937,7 +811,7 @@ def process_prompt_response(
         )
         events.extend(action_events)
         patches.extend(action_patches)
-    elif prompt["type"] == "BUILD_OR_SKIP" and normalized_choice == "BUILD":
+    elif prompt.type == "BUILD_OR_SKIP" and normalized_choice == "BUILD":
         action_events, action_patches = _apply_build(
             state,
             player_id=player_id,
@@ -945,7 +819,7 @@ def process_prompt_response(
         )
         events.extend(action_events)
         patches.extend(action_patches)
-    elif prompt["type"] == "PAY_TOLL":
+    elif prompt.type == "PAY_TOLL":
         action_events, action_patches = _apply_toll_payment(
             state,
             player_id=player_id,
@@ -953,30 +827,30 @@ def process_prompt_response(
         )
         events.extend(action_events)
         patches.extend(action_patches)
-    elif prompt["type"] == "TRAVEL_SELECT" and normalized_choice == "CONFIRM":
-        target_tile_id = response_payload.get("targetTileId")
-        if not isinstance(target_tile_id, int):
+    elif prompt.type == "TRAVEL_SELECT" and normalized_choice == "CONFIRM":
+        raw_target_tile_id = response_payload.get("targetTileId")
+        try:
+            target_tile_id = int(raw_target_tile_id)
+        except (TypeError, ValueError) as exc:
             raise GameActionError(
-                code="INVALID_TILE", message="Travel destination is required."
-            )
+                code="INVALID_TILE",
+                message="여행 목적지를 선택해주세요.",
+            ) from exc
+
         if target_tile_id < 0 or target_tile_id >= BOARD_SIZE:
             raise GameActionError(
-                code="INVALID_TILE", message="Travel destination is out of range."
+                code="INVALID_TILE",
+                message="여행 목적지 범위가 올바르지 않습니다.",
             )
 
-        current_tile_id = state["players"][str(player_id)]["currentTileId"]
+        current_tile_id = state.require_player(player_id).current_tile_id
         if target_tile_id == current_tile_id:
             raise GameActionError(
-                code="INVALID_TILE", message="Choose a different destination."
+                code="INVALID_TILE",
+                message="현재 위치와 다른 목적지를 선택해주세요.",
             )
 
-        patches.append(
-            {
-                "op": "set",
-                "path": f"players.{player_id}.currentTileId",
-                "value": target_tile_id,
-            }
-        )
+        patches.append(op_set(f"players.{player_id}.current_tile_id", target_tile_id))
         events.append(
             {
                 "type": ServerEventType.PLAYER_MOVED,
@@ -988,14 +862,12 @@ def process_prompt_response(
         )
         _append_landed_event(events, player_id=player_id, tile_id=target_tile_id)
 
-        preview_state = {
-            **state,
-            "players": copy.deepcopy(state["players"]),
-            "tiles": copy.deepcopy(state["tiles"]),
-        }
+        preview_state = state.clone()
         apply_patches(preview_state, patches)
         landing_events, landing_patches = resolve_landing(
-            preview_state, player_id, target_tile_id
+            preview_state,
+            player_id,
+            target_tile_id,
         )
         events.extend(landing_events)
         patches.extend(landing_patches)

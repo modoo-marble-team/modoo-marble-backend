@@ -12,7 +12,6 @@ from tortoise import Tortoise
 from app.config import TORTOISE_ORM, settings
 from app.dm.socket_handlers import register_dm_handlers
 from app.errors import register_error_handlers
-from app.game.reconnect import mark_disconnected
 from app.game.socket_handlers import register_game_handlers
 from app.game.sync_runtime import (
     handle_game_socket_connect,
@@ -23,7 +22,7 @@ from app.game.sync_runtime import (
 from app.lobby.socket_handlers import register_lobby_handlers
 from app.models.user import User
 from app.presence import set_offline, set_online
-from app.redis_client import close_redis, get_redis, init_redis
+from app.redis_client import close_redis, init_redis
 from app.routers import auth, game, lobby, users
 from app.utils.jwt import decode_token
 
@@ -57,7 +56,7 @@ async def connect(sid: str, environ: dict, auth_data: dict | None):
     try:
         token = (auth_data or {}).get("token")
         if not token:
-            raise ConnectionRefusedError("Missing token")
+            raise ConnectionRefusedError("토큰이 없습니다.")
 
         payload = decode_token(
             secret=settings.JWT_SECRET,
@@ -66,16 +65,16 @@ async def connect(sid: str, environ: dict, auth_data: dict | None):
         )
         sub = payload.get("sub")
         if not sub:
-            raise ConnectionRefusedError("Invalid payload")
+            raise ConnectionRefusedError("토큰 정보가 올바르지 않습니다.")
 
         try:
             user_id = int(sub)
         except (TypeError, ValueError) as e:
-            raise ConnectionRefusedError("Invalid user id") from e
+            raise ConnectionRefusedError("사용자 정보가 올바르지 않습니다.") from e
 
         user = await User.get_or_none(id=user_id, deleted_at__isnull=True)
         if not user:
-            raise ConnectionRefusedError("User not found or deleted")
+            raise ConnectionRefusedError("사용자를 찾을 수 없습니다.")
 
         _sid_to_user[sid] = int(user.id)
         await handle_game_socket_connect(sid=sid, user_id=int(user.id))
@@ -87,7 +86,7 @@ async def connect(sid: str, environ: dict, auth_data: dict | None):
     except ConnectionRefusedError as e:
         raise e
     except Exception:
-        raise ConnectionRefusedError("Internal server error")
+        raise ConnectionRefusedError("서버 내부 오류가 발생했습니다.")
 
 
 @sio.event
@@ -100,7 +99,6 @@ async def disconnect(sid: str):
             nickname = user.nickname if user else ""
 
             await handle_game_socket_disconnect(sid=sid, user_id=int(user_id))
-            await _handle_game_disconnect(int(user_id))
             await _handle_room_disconnect(int(user_id))
             await set_offline(user_id=str(user_id))
             await _broadcast_user_status(int(user_id), nickname, "offline")
@@ -108,23 +106,6 @@ async def disconnect(sid: str):
         pass
     finally:
         _sid_to_user.pop(sid, None)
-
-
-async def _handle_game_disconnect(user_id: int) -> None:
-    try:
-        redis = get_redis()
-        game_id = await redis.get(f"user:{user_id}:game")
-        if game_id is None:
-            return
-
-        await mark_disconnected(
-            game_id=game_id,
-            user_id=user_id,
-            sio=sio,
-            sid_to_user=_sid_to_user,
-        )
-    except Exception:
-        pass
 
 
 async def _handle_room_disconnect(user_id: int) -> None:
@@ -135,6 +116,10 @@ async def _handle_room_disconnect(user_id: int) -> None:
     try:
         room_id = await room_service._get_user_room_id(user_id)
         if room_id is None:
+            return
+
+        room = await room_service.get_room(room_id)
+        if room is None or room.get("status") != "waiting":
             return
 
         room, new_host_id = await room_service.leave_room(

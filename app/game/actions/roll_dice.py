@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import copy
 import random
 
 from app.game.board import BOARD_SIZE, ISLAND_TILE_ID, START_SALARY, TILE_MAP
 from app.game.enums import PlayerState, ServerEventType
 from app.game.errors import GameActionError
+from app.game.models import GameState
+from app.game.patch import op_inc, op_set
 from app.game.rules import PHASE_WAIT_ROLL, resolve_landing
-from app.game.schemas import GameState
 from app.game.state import apply_patches
 
 
@@ -15,16 +15,18 @@ def _roll() -> tuple[int, int]:
     return random.randint(1, 6), random.randint(1, 6)
 
 
+def _preview_state(state: GameState) -> GameState:
+    return state.clone()
+
+
 def _add_movement(
     player_id: int,
     from_tile: int,
     to_tile: int,
-    events: list,
-    patches: list,
+    events: list[dict],
+    patches: list[dict],
 ) -> None:
-    patches.append(
-        {"op": "set", "path": f"players.{player_id}.currentTileId", "value": to_tile}
-    )
+    patches.append(op_set(f"players.{player_id}.current_tile_id", to_tile))
     events.append(
         {
             "type": ServerEventType.PLAYER_MOVED,
@@ -36,40 +38,44 @@ def _add_movement(
     )
 
     tile_def = TILE_MAP.get(to_tile)
-    if tile_def:
-        events.append(
-            {
-                "type": ServerEventType.LANDED,
-                "playerId": player_id,
-                "tile": {
-                    "tileId": tile_def.tile_id,
-                    "name": tile_def.name,
-                    "tileType": str(tile_def.tile_type),
-                    "tier": tile_def.tier,
-                    "price": tile_def.price,
-                },
-            }
-        )
+    if tile_def is None:
+        return
+
+    events.append(
+        {
+            "type": ServerEventType.LANDED,
+            "playerId": player_id,
+            "tile": {
+                "tileId": tile_def.tile_id,
+                "name": tile_def.name,
+                "tileType": str(tile_def.tile_type),
+                "tier": tile_def.tier,
+                "price": tile_def.price,
+            },
+        }
+    )
 
 
 def process_roll_dice(
     state: GameState,
     player_id: int,
 ) -> tuple[list[dict], list[dict]]:
-    player = state["players"].get(str(player_id))
+    player = state.player(player_id)
     if player is None:
-        raise GameActionError(code="PLAYER_NOT_FOUND", message="Player not found.")
-    if state["current_player_id"] != player_id:
-        raise GameActionError(code="NOT_YOUR_TURN", message="It is not your turn.")
-    if state["status"] != "playing":
-        raise GameActionError(code="INVALID_PHASE", message="Game is not active.")
-    if state["phase"] != PHASE_WAIT_ROLL:
+        raise GameActionError(code="PLAYER_NOT_FOUND", message="플레이어를 찾을 수 없습니다.")
+    if state.current_player_id != player_id:
+        raise GameActionError(code="NOT_YOUR_TURN", message="내 턴이 아닙니다.")
+    if state.status != "playing":
+        raise GameActionError(code="INVALID_PHASE", message="진행 중인 게임이 아닙니다.")
+    if state.phase != PHASE_WAIT_ROLL:
         raise GameActionError(
-            code="INVALID_PHASE", message="Dice can only be rolled at turn start."
+            code="INVALID_PHASE",
+            message="주사위는 턴 시작 시에만 굴릴 수 있습니다.",
         )
-    if player["playerState"] == PlayerState.BANKRUPT:
+    if player.player_state == PlayerState.BANKRUPT:
         raise GameActionError(
-            code="PLAYER_BANKRUPT", message="Bankrupt players cannot act."
+            code="PLAYER_BANKRUPT",
+            message="파산한 플레이어는 행동할 수 없습니다.",
         )
 
     dice1, dice2 = _roll()
@@ -86,28 +92,16 @@ def process_roll_dice(
     ]
     patches: list[dict] = []
 
-    # ── 케이스 1: 무인도에 갇힌 상태 ───────────────────
-    if player["playerState"] == PlayerState.LOCKED:
-        patches.append({"op": "set", "path": "phase", "value": "RESOLVING"})
+    if player.player_state == PlayerState.LOCKED:
+        patches.append(op_set("phase", "RESOLVING"))
         if is_double:
-            # 더블 → 탈출 후 이동
-            patches += [
-                {
-                    "op": "set",
-                    "path": f"players.{player_id}.playerState",
-                    "value": PlayerState.NORMAL,
-                },
-                {
-                    "op": "set",
-                    "path": f"players.{player_id}.stateDuration",
-                    "value": 0,
-                },
-                {
-                    "op": "set",
-                    "path": f"players.{player_id}.consecutiveDoubles",
-                    "value": 0,
-                },
-            ]
+            patches.extend(
+                [
+                    op_set(f"players.{player_id}.player_state", PlayerState.NORMAL),
+                    op_set(f"players.{player_id}.state_duration", 0),
+                    op_set(f"players.{player_id}.consecutive_doubles", 0),
+                ]
+            )
             events.append(
                 {
                     "type": ServerEventType.PLAYER_STATE_CHANGED,
@@ -116,38 +110,28 @@ def process_roll_dice(
                     "reason": "double_escape",
                 }
             )
-            from_tile = player["currentTileId"]
+            from_tile = player.current_tile_id
             to_tile = (from_tile + total) % BOARD_SIZE
             _add_movement(player_id, from_tile, to_tile, events, patches)
-            preview_state = {
-                **state,
-                "players": copy.deepcopy(state["players"]),
-                "tiles": copy.deepcopy(state["tiles"]),
-            }
+            preview_state = _preview_state(state)
             apply_patches(preview_state, patches)
             landing_events, landing_patches = resolve_landing(
-                preview_state, player_id, to_tile
+                preview_state,
+                player_id,
+                to_tile,
             )
             events.extend(landing_events)
             patches.extend(landing_patches)
             return events, patches
 
-        # 더블 아님 → 무인도 잔여 턴 차감
-        new_duration = player["stateDuration"] - 1
+        new_duration = player.state_duration - 1
         if new_duration <= 0:
-            # 3턴 경과 → 자동 탈출 (이동 없음)
-            patches += [
-                {
-                    "op": "set",
-                    "path": f"players.{player_id}.playerState",
-                    "value": PlayerState.NORMAL,
-                },
-                {
-                    "op": "set",
-                    "path": f"players.{player_id}.stateDuration",
-                    "value": 0,
-                },
-            ]
+            patches.extend(
+                [
+                    op_set(f"players.{player_id}.player_state", PlayerState.NORMAL),
+                    op_set(f"players.{player_id}.state_duration", 0),
+                ]
+            )
             events.append(
                 {
                     "type": ServerEventType.PLAYER_STATE_CHANGED,
@@ -157,70 +141,46 @@ def process_roll_dice(
                 }
             )
         else:
-            patches.append(
-                {
-                    "op": "set",
-                    "path": f"players.{player_id}.stateDuration",
-                    "value": new_duration,
-                }
-            )
-        return events, patches  # 무인도 케이스는 여기서 종료
+            patches.append(op_set(f"players.{player_id}.state_duration", new_duration))
+        return events, patches
 
-    # ── 케이스 2: 3연속 더블 → 무인도 ──────────────────
-    new_consecutive = player["consecutiveDoubles"] + 1 if is_double else 0
+    new_consecutive = player.consecutive_doubles + 1 if is_double else 0
 
     if is_double and new_consecutive >= 3:
-        from_tile = player["currentTileId"]
-        patches += [
-            {
-                "op": "set",
-                "path": f"players.{player_id}.currentTileId",
-                "value": ISLAND_TILE_ID,
-            },
-            {
-                "op": "set",
-                "path": f"players.{player_id}.playerState",
-                "value": PlayerState.LOCKED,
-            },
-            {"op": "set", "path": f"players.{player_id}.stateDuration", "value": 3},
-            {
-                "op": "set",
-                "path": f"players.{player_id}.consecutiveDoubles",
-                "value": 0,
-            },
-        ]
-        events += [
-            {
-                "type": ServerEventType.PLAYER_MOVED,
-                "playerId": player_id,
-                "fromTileId": from_tile,
-                "toTileId": ISLAND_TILE_ID,
-                "trigger": "triple_double",
-            },
-            {
-                "type": ServerEventType.PLAYER_STATE_CHANGED,
-                "playerId": player_id,
-                "playerState": PlayerState.LOCKED,
-                "reason": "triple_double",
-            },
-        ]
-        return events, patches  # 무인도 이동 후 종료
+        from_tile = player.current_tile_id
+        patches.extend(
+            [
+                op_set(f"players.{player_id}.current_tile_id", ISLAND_TILE_ID),
+                op_set(f"players.{player_id}.player_state", PlayerState.LOCKED),
+                op_set(f"players.{player_id}.state_duration", 3),
+                op_set(f"players.{player_id}.consecutive_doubles", 0),
+            ]
+        )
+        events.extend(
+            [
+                {
+                    "type": ServerEventType.PLAYER_MOVED,
+                    "playerId": player_id,
+                    "fromTileId": from_tile,
+                    "toTileId": ISLAND_TILE_ID,
+                    "trigger": "triple_double",
+                },
+                {
+                    "type": ServerEventType.PLAYER_STATE_CHANGED,
+                    "playerId": player_id,
+                    "playerState": PlayerState.LOCKED,
+                    "reason": "triple_double",
+                },
+            ]
+        )
+        return events, patches
 
-    # ── 케이스 3: 일반 이동 ─────────────────────────────
-    patches.append(
-        {
-            "op": "set",
-            "path": f"players.{player_id}.consecutiveDoubles",
-            "value": new_consecutive,
-        }
-    )
+    patches.append(op_set(f"players.{player_id}.consecutive_doubles", new_consecutive))
 
-    from_tile = player["currentTileId"]
+    from_tile = player.current_tile_id
     to_tile = (from_tile + total) % BOARD_SIZE
     if from_tile + total >= BOARD_SIZE:
-        patches.append(
-            {"op": "inc", "path": f"players.{player_id}.balance", "value": START_SALARY}
-        )
+        patches.append(op_inc(f"players.{player_id}.balance", START_SALARY))
         events.append(
             {
                 "type": "PASSED_START",
@@ -230,11 +190,7 @@ def process_roll_dice(
         )
 
     _add_movement(player_id, from_tile, to_tile, events, patches)
-    preview_state = {
-        **state,
-        "players": copy.deepcopy(state["players"]),
-        "tiles": copy.deepcopy(state["tiles"]),
-    }
+    preview_state = _preview_state(state)
     apply_patches(preview_state, patches)
     landing_events, landing_patches = resolve_landing(preview_state, player_id, to_tile)
     events.extend(landing_events)

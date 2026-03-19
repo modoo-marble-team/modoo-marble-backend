@@ -20,7 +20,7 @@ def register_lobby_handlers(
         if user_id is None:
             await sio.emit(
                 "game:error",
-                {"code": "AUTH_REQUIRED", "message": "Authentication required."},
+                {"code": "AUTH_REQUIRED", "message": "인증이 필요합니다."},
                 to=sid,
             )
             return
@@ -29,7 +29,7 @@ def register_lobby_handlers(
         if room is None:
             await sio.emit(
                 "game:error",
-                {"code": "ROOM_NOT_FOUND", "message": "Room not found."},
+                {"code": "ROOM_NOT_FOUND", "message": "방을 찾을 수 없습니다."},
                 to=sid,
             )
             return
@@ -37,7 +37,7 @@ def register_lobby_handlers(
         if not any(player["id"] == str(user_id) for player in room["players"]):
             await sio.emit(
                 "game:error",
-                {"code": "NOT_ROOM_MEMBER", "message": "You are not in this room."},
+                {"code": "NOT_ROOM_MEMBER", "message": "방 멤버가 아닙니다."},
                 to=sid,
             )
             return
@@ -63,7 +63,7 @@ def register_lobby_handlers(
         if user_id is None:
             await sio.emit(
                 "game:error",
-                {"code": "AUTH_REQUIRED", "message": "Authentication required."},
+                {"code": "AUTH_REQUIRED", "message": "인증이 필요합니다."},
                 to=sid,
             )
             return

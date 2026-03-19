@@ -12,9 +12,12 @@ import structlog
 
 from app.config import settings
 from app.game.enums import PlayerState, ServerEventType
+from app.game.models import GameState, PlayerGameState
+from app.game.patch import op_set
 from app.game.presentation import serialize_game_patch
 from app.game.rules import PHASE_GAME_OVER, PHASE_WAIT_ROLL
 from app.game.state import game_lock, get_game_state, save_game_state
+from app.presence import update_status
 from app.redis_client import get_redis
 
 logger = structlog.get_logger()
@@ -64,9 +67,7 @@ class GameSyncRuntime:
     def _parse_disconnect_schedule_member(self, member: str) -> tuple[str, int] | None:
         try:
             payload = json.loads(member)
-            game_id = str(payload["gameId"])
-            player_id = int(payload["playerId"])
-            return game_id, player_id
+            return str(payload["gameId"]), int(payload["playerId"])
         except (KeyError, TypeError, ValueError, json.JSONDecodeError):
             return None
 
@@ -78,8 +79,7 @@ class GameSyncRuntime:
 
     def _schedule_shard(self, game_id: str, player_id: int) -> int:
         shard_count = max(settings.GAME_SYNC_DISCONNECT_SCHEDULE_SHARDS, 1)
-        raw = f"{game_id}:{player_id}".encode()
-        digest = hashlib.md5(raw).hexdigest()
+        digest = hashlib.md5(f"{game_id}:{player_id}".encode()).hexdigest()
         return int(digest, 16) % shard_count
 
     def _now_ts(self) -> float:
@@ -103,18 +103,32 @@ class GameSyncRuntime:
             return
 
         state = await get_game_state(game_id)
-        if state is None:
-            return
-        if state.get("status") != "playing":
+        if state is None or state.status != "playing":
             return
 
-        player = state["players"].get(str(user_id))
-        if player is None:
-            return
-        if player.get("playerState") == PlayerState.BANKRUPT:
+        player = state.player(user_id)
+        if player is None or player.player_state == PlayerState.BANKRUPT:
             return
 
         await self.set_disconnected_at(game_id=game_id, player_id=user_id)
+        await self._sio.emit(
+            "game:patch",
+            {
+                "gameId": game_id,
+                "revision": state.revision,
+                "turn": state.turn,
+                "events": [
+                    {
+                        "type": ServerEventType.PLAYER_DISCONNECTED,
+                        "playerId": user_id,
+                        "timeoutSeconds": settings.GAME_SYNC_DISCONNECT_GRACE_SECONDS,
+                    }
+                ],
+                "patch": [],
+                "snapshot": None,
+            },
+            room=f"game:{game_id}",
+        )
 
     async def handle_sync(
         self,
@@ -123,18 +137,18 @@ class GameSyncRuntime:
         user_id: int,
         game_id: str,
         known_revision: int,
-    ) -> dict[str, Any] | None:
+    ) -> GameState | None:
         state = await get_game_state(game_id)
         if state is None:
             await self._emit_desync(
                 sid=sid,
                 game_id=game_id,
-                message="진행 중인 게임 상태가 없습니다.",
+                message="진행 중인 게임 상태를 찾을 수 없습니다.",
                 snapshot=None,
             )
             return None
 
-        if str(user_id) not in state["players"]:
+        if user_id not in state.players:
             await self._emit_desync(
                 sid=sid,
                 game_id=game_id,
@@ -144,26 +158,37 @@ class GameSyncRuntime:
             return None
 
         await self.set_active_game(user_id=user_id, game_id=game_id)
+        was_disconnected = (
+            await self.get_disconnected_at(game_id=game_id, player_id=user_id)
+        ) is not None
         await self.clear_disconnected_at(game_id=game_id, player_id=user_id)
         await self._sio.enter_room(sid, f"game:{game_id}")
+        await update_status(user_id=str(user_id), status="playing")
 
-        current_revision = int(state.get("revision", 0))
+        current_revision = state.revision
+        sync_event = {
+            "type": ServerEventType.SYNCED,
+            "player_id": user_id,
+            "known_revision": known_revision,
+            "current_revision": current_revision,
+        }
 
         if known_revision < 0:
-            packet = serialize_game_patch(
-                state,
-                events=[
-                    {
-                        "type": ServerEventType.SYNCED,
-                        "player_id": user_id,
-                        "known_revision": known_revision,
-                        "current_revision": current_revision,
-                    }
-                ],
-                patches=[],
-                include_snapshot=True,
+            await self._sio.emit(
+                "game:patch",
+                serialize_game_patch(
+                    state,
+                    events=[sync_event],
+                    patches=[],
+                    include_snapshot=True,
+                ),
+                to=sid,
             )
-            await self._sio.emit("game:patch", packet, to=sid)
+            await self._emit_reconnected_if_needed(
+                game_id=game_id,
+                player_id=user_id,
+                was_disconnected=was_disconnected,
+            )
             return state
 
         if known_revision > current_revision:
@@ -171,10 +196,7 @@ class GameSyncRuntime:
                 state,
                 events=[
                     {
-                        "type": ServerEventType.SYNCED,
-                        "player_id": user_id,
-                        "known_revision": known_revision,
-                        "current_revision": current_revision,
+                        **sync_event,
                         "require_full_reload": True,
                         "snapshot_revision": current_revision,
                     }
@@ -185,33 +207,38 @@ class GameSyncRuntime:
             await self._emit_desync(
                 sid=sid,
                 game_id=game_id,
-                message="클라이언트 상태가 서버보다 앞서 있습니다. 최신 상태로 재동기화합니다.",
+                message="클라이언트 상태가 서버보다 앞서 있습니다.",
                 snapshot=snapshot_packet,
+            )
+            await self._emit_reconnected_if_needed(
+                game_id=game_id,
+                player_id=user_id,
+                was_disconnected=was_disconnected,
             )
             return state
 
         if known_revision == current_revision:
-            packet = serialize_game_patch(
-                state,
-                events=[
-                    {
-                        "type": ServerEventType.SYNCED,
-                        "player_id": user_id,
-                        "known_revision": known_revision,
-                        "current_revision": current_revision,
-                    }
-                ],
-                patches=[],
-                include_snapshot=False,
+            await self._sio.emit(
+                "game:patch",
+                serialize_game_patch(
+                    state,
+                    events=[sync_event],
+                    patches=[],
+                    include_snapshot=False,
+                ),
+                to=sid,
             )
-            await self._sio.emit("game:patch", packet, to=sid)
+            await self._emit_reconnected_if_needed(
+                game_id=game_id,
+                player_id=user_id,
+                was_disconnected=was_disconnected,
+            )
             return state
 
         packets = await self.get_patches_after(
             game_id=game_id,
             known_revision=known_revision,
         )
-
         if self._has_contiguous_packets(
             packets=packets,
             start_revision=known_revision + 1,
@@ -219,16 +246,18 @@ class GameSyncRuntime:
         ):
             for packet in packets:
                 await self._sio.emit("game:patch", packet, to=sid)
+            await self._emit_reconnected_if_needed(
+                game_id=game_id,
+                player_id=user_id,
+                was_disconnected=was_disconnected,
+            )
             return state
 
         snapshot_packet = serialize_game_patch(
             state,
             events=[
                 {
-                    "type": ServerEventType.SYNCED,
-                    "player_id": user_id,
-                    "known_revision": known_revision,
-                    "current_revision": current_revision,
+                    **sync_event,
                     "require_full_reload": True,
                     "snapshot_revision": current_revision,
                 }
@@ -237,12 +266,17 @@ class GameSyncRuntime:
             include_snapshot=True,
         )
         await self._sio.emit("game:patch", snapshot_packet, to=sid)
+        await self._emit_reconnected_if_needed(
+            game_id=game_id,
+            player_id=user_id,
+            was_disconnected=was_disconnected,
+        )
         return state
 
     async def build_and_store_patch_packet(
         self,
         *,
-        state: dict[str, Any],
+        state: GameState,
         events: list[dict[str, Any]],
         patches: list[dict[str, Any]],
         include_snapshot: bool = False,
@@ -253,7 +287,7 @@ class GameSyncRuntime:
             patches=patches,
             include_snapshot=include_snapshot,
         )
-        await self.append_patch_packet(game_id=str(state["game_id"]), packet=packet)
+        await self.append_patch_packet(game_id=state.game_id, packet=packet)
         return packet
 
     async def append_patch_packet(
@@ -383,15 +417,40 @@ class GameSyncRuntime:
     ) -> None:
         await self._sio.emit(
             "game:error",
-            {
-                "gameId": game_id,
-                "code": "DESYNC",
-                "message": message,
-            },
+            {"gameId": game_id, "code": "DESYNC", "message": message},
             to=sid,
         )
         if snapshot is not None:
             await self._sio.emit("game:patch", snapshot, to=sid)
+
+    async def _emit_reconnected_if_needed(
+        self,
+        *,
+        game_id: str,
+        player_id: int,
+        was_disconnected: bool,
+    ) -> None:
+        if not was_disconnected:
+            return
+
+        state = await get_game_state(game_id)
+        await self._sio.emit(
+            "game:patch",
+            {
+                "gameId": game_id,
+                "revision": state.revision if state else None,
+                "turn": state.turn if state else None,
+                "events": [
+                    {
+                        "type": ServerEventType.PLAYER_RECONNECTED,
+                        "playerId": player_id,
+                    }
+                ],
+                "patch": [],
+                "snapshot": None,
+            },
+            room=f"game:{game_id}",
+        )
 
     def _has_contiguous_packets(
         self,
@@ -409,7 +468,6 @@ class GameSyncRuntime:
             if revision != expected:
                 return False
             expected += 1
-
         return expected - 1 == end_revision
 
     async def _scheduler_loop(self) -> None:
@@ -420,8 +478,8 @@ class GameSyncRuntime:
                 await asyncio.sleep(settings.GAME_SYNC_WORKER_POLL_INTERVAL_SECONDS)
             except asyncio.CancelledError:
                 raise
-            except Exception as e:
-                logger.exception("game sync scheduler loop error", error=str(e))
+            except Exception as exc:
+                logger.exception("game sync scheduler loop error", error=str(exc))
                 await asyncio.sleep(settings.GAME_SYNC_WORKER_POLL_INTERVAL_SECONDS)
 
     async def _worker_loop(self) -> None:
@@ -437,8 +495,8 @@ class GameSyncRuntime:
                     self._disconnect_queue.task_done()
             except asyncio.CancelledError:
                 raise
-            except Exception as e:
-                logger.exception("disconnect worker loop error", error=str(e))
+            except Exception as exc:
+                logger.exception("disconnect worker loop error", error=str(exc))
 
     async def _acquire_leader(self) -> bool:
         redis = get_redis()
@@ -524,8 +582,7 @@ class GameSyncRuntime:
             await self.clear_disconnected_at(game_id=game_id, player_id=player_id)
             return
 
-        elapsed = self._now_ts() - disconnected_at
-        if elapsed < settings.GAME_SYNC_DISCONNECT_GRACE_SECONDS:
+        if self._now_ts() - disconnected_at < settings.GAME_SYNC_DISCONNECT_GRACE_SECONDS:
             return
 
         async with game_lock(game_id):
@@ -537,55 +594,21 @@ class GameSyncRuntime:
                 await self.clear_disconnected_at(game_id=game_id, player_id=player_id)
                 return
 
-            elapsed = self._now_ts() - disconnected_at
-            if elapsed < settings.GAME_SYNC_DISCONNECT_GRACE_SECONDS:
+            if self._now_ts() - disconnected_at < settings.GAME_SYNC_DISCONNECT_GRACE_SECONDS:
                 return
 
             if not await self._try_claim_timer(game_id=game_id, player_id=player_id):
                 return
 
             try:
-                disconnected_at = await self.get_disconnected_at(
-                    game_id=game_id,
-                    player_id=player_id,
-                )
-                if disconnected_at is None:
-                    await self.clear_disconnected_at(
-                        game_id=game_id,
-                        player_id=player_id,
-                    )
-                    return
-
-                elapsed = self._now_ts() - disconnected_at
-                if elapsed < settings.GAME_SYNC_DISCONNECT_GRACE_SECONDS:
-                    return
-
                 state = await get_game_state(game_id)
-                if state is None:
-                    await self.clear_disconnected_at(
-                        game_id=game_id,
-                        player_id=player_id,
-                    )
-                    return
-                if state.get("status") != "playing":
-                    await self.clear_disconnected_at(
-                        game_id=game_id,
-                        player_id=player_id,
-                    )
+                if state is None or state.status != "playing":
+                    await self.clear_disconnected_at(game_id=game_id, player_id=player_id)
                     return
 
-                player = state["players"].get(str(player_id))
-                if player is None:
-                    await self.clear_disconnected_at(
-                        game_id=game_id,
-                        player_id=player_id,
-                    )
-                    return
-                if player.get("playerState") == PlayerState.BANKRUPT:
-                    await self.clear_disconnected_at(
-                        game_id=game_id,
-                        player_id=player_id,
-                    )
+                player = state.player(player_id)
+                if player is None or player.player_state == PlayerState.BANKRUPT:
+                    await self.clear_disconnected_at(game_id=game_id, player_id=player_id)
                     return
 
                 events: list[dict[str, Any]] = []
@@ -601,28 +624,31 @@ class GameSyncRuntime:
 
                 alive_players = self._active_players(state)
                 if len(alive_players) <= 1:
-                    winner_player_id = (
-                        alive_players[0]["playerId"] if alive_players else None
+                    winner = (
+                        self._winner_payload(alive_players[0])
+                        if alive_players
+                        else None
                     )
-                    state["status"] = "finished"
-                    state["phase"] = PHASE_GAME_OVER
-                    state["pending_prompt"] = None
-
+                    state.status = "finished"
+                    state.phase = PHASE_GAME_OVER
+                    state.pending_prompt = None
+                    state.winner_id = winner["playerId"] if winner else None
                     patch.extend(
                         [
-                            {"op": "set", "path": "isGameOver", "value": True},
-                            {"op": "set", "path": "phase", "value": PHASE_GAME_OVER},
-                            {"op": "set", "path": "prompt", "value": None},
+                            op_set("status", "finished"),
+                            op_set("phase", PHASE_GAME_OVER),
+                            op_set("pending_prompt", None),
+                            op_set("winner_id", state.winner_id),
                         ]
                     )
                     events.append(
                         {
                             "type": ServerEventType.GAME_OVER,
-                            "winner_player_id": winner_player_id,
                             "reason": "disconnect_timeout",
+                            "winner": winner,
                         }
                     )
-                elif state["current_player_id"] == player_id:
+                elif state.current_player_id == player_id:
                     self._advance_turn_after_forced_bankruptcy(
                         state=state,
                         player_id=player_id,
@@ -630,7 +656,7 @@ class GameSyncRuntime:
                         patch=patch,
                     )
 
-                state["revision"] += 1
+                state.revision += 1
                 await save_game_state(game_id, state)
 
                 packet = await self.build_and_store_patch_packet(
@@ -642,6 +668,9 @@ class GameSyncRuntime:
 
                 await self.clear_disconnected_at(game_id=game_id, player_id=player_id)
                 await self._sio.emit("game:patch", packet, room=f"game:{game_id}")
+                if state.status == "finished":
+                    for pid in state.players:
+                        await update_status(user_id=str(pid), status="lobby")
             finally:
                 redis = get_redis()
                 await redis.delete(self._timer_claim_key(game_id, player_id))
@@ -649,75 +678,49 @@ class GameSyncRuntime:
     def _bankrupt_player(
         self,
         *,
-        state: dict[str, Any],
+        state: GameState,
         player_id: int,
         events: list[dict[str, Any]],
         patch: list[dict[str, Any]],
         reason: str,
     ) -> None:
-        player = state["players"][str(player_id)]
-        player["playerState"] = PlayerState.BANKRUPT
-        player["stateDuration"] = 0
-        player["consecutiveDoubles"] = 0
+        player = state.require_player(player_id)
+        player.balance = 0
+        player.player_state = PlayerState.BANKRUPT
+        player.state_duration = 0
+        player.consecutive_doubles = 0
+        player.building_levels = {}
 
         patch.extend(
             [
-                {
-                    "op": "set",
-                    "path": f"players.{player_id}.playerState",
-                    "value": PlayerState.BANKRUPT,
-                },
-                {
-                    "op": "set",
-                    "path": f"players.{player_id}.stateDuration",
-                    "value": 0,
-                },
-                {
-                    "op": "set",
-                    "path": f"players.{player_id}.consecutiveDoubles",
-                    "value": 0,
-                },
+                op_set(f"players.{player_id}.balance", 0),
+                op_set(f"players.{player_id}.player_state", PlayerState.BANKRUPT),
+                op_set(f"players.{player_id}.state_duration", 0),
+                op_set(f"players.{player_id}.consecutive_doubles", 0),
+                op_set(f"players.{player_id}.building_levels", {}),
             ]
         )
 
-        owned_tile_ids = list(player.get("ownedTiles", []))
-        for tile_id in owned_tile_ids:
-            tile_state = state["tiles"].get(str(tile_id))
+        for tile_id in list(player.owned_tiles):
+            tile_state = state.tile(tile_id)
             if tile_state is None:
                 continue
-            tile_state["ownerId"] = None
-            tile_state["buildingLevel"] = 0
+            tile_state.owner_id = None
+            tile_state.building_level = 0
             patch.extend(
                 [
-                    {
-                        "op": "set",
-                        "path": f"tiles.{tile_id}.owner_id",
-                        "value": None,
-                    },
-                    {
-                        "op": "set",
-                        "path": f"tiles.{tile_id}.building_level",
-                        "value": 0,
-                    },
+                    op_set(f"tiles.{tile_id}.owner_id", None),
+                    op_set(f"tiles.{tile_id}.building_level", 0),
                 ]
             )
 
-        player["ownedTiles"] = []
-        patch.append(
-            {
-                "op": "set",
-                "path": f"players.{player_id}.ownedTiles",
-                "value": [],
-            }
-        )
+        player.owned_tiles = []
+        patch.append(op_set(f"players.{player_id}.owned_tiles", []))
 
-        pending_prompt = state.get("pending_prompt")
-        if (
-            isinstance(pending_prompt, dict)
-            and pending_prompt.get("player_id") == player_id
-        ):
-            state["pending_prompt"] = None
-            patch.append({"op": "set", "path": "prompt", "value": None})
+        pending_prompt = state.pending_prompt
+        if pending_prompt is not None and pending_prompt.player_id == player_id:
+            state.pending_prompt = None
+            patch.append(op_set("pending_prompt", None))
 
         events.append(
             {
@@ -731,59 +734,59 @@ class GameSyncRuntime:
     def _advance_turn_after_forced_bankruptcy(
         self,
         *,
-        state: dict[str, Any],
+        state: GameState,
         player_id: int,
         events: list[dict[str, Any]],
         patch: list[dict[str, Any]],
     ) -> None:
         active_players = self._active_players(state)
         if not active_players:
-            state["status"] = "finished"
-            state["phase"] = PHASE_GAME_OVER
-            state["pending_prompt"] = None
+            state.status = "finished"
+            state.phase = PHASE_GAME_OVER
+            state.pending_prompt = None
+            state.winner_id = None
             patch.extend(
                 [
-                    {"op": "set", "path": "isGameOver", "value": True},
-                    {"op": "set", "path": "phase", "value": PHASE_GAME_OVER},
-                    {"op": "set", "path": "prompt", "value": None},
+                    op_set("status", "finished"),
+                    op_set("phase", PHASE_GAME_OVER),
+                    op_set("pending_prompt", None),
+                    op_set("winner_id", None),
                 ]
             )
             events.append(
                 {
                     "type": ServerEventType.GAME_OVER,
-                    "winner_player_id": None,
                     "reason": "disconnect_timeout",
+                    "winner": None,
                 }
             )
             return
 
-        current_order = state["players"][str(player_id)]["turnOrder"]
+        current_order = state.require_player(player_id).turn_order
         next_player = active_players[0]
         for candidate in active_players:
-            if candidate["turnOrder"] > current_order:
+            if candidate.turn_order > current_order:
                 next_player = candidate
                 break
 
-        next_player_id = next_player["playerId"]
-        next_order = next_player["turnOrder"]
-        new_turn = state["turn"] + 1
-        new_round = (
-            state["round"] + 1 if next_order <= current_order else state["round"]
-        )
+        next_player_id = next_player.player_id
+        next_order = next_player.turn_order
+        new_turn = state.turn + 1
+        new_round = state.round + 1 if next_order <= current_order else state.round
 
-        state["current_player_id"] = next_player_id
-        state["turn"] = new_turn
-        state["round"] = new_round
-        state["phase"] = PHASE_WAIT_ROLL
-        state["pending_prompt"] = None
+        state.current_player_id = next_player_id
+        state.turn = new_turn
+        state.round = new_round
+        state.phase = PHASE_WAIT_ROLL
+        state.pending_prompt = None
 
         patch.extend(
             [
-                {"op": "set", "path": "current_player_id", "value": next_player_id},
-                {"op": "set", "path": "turn", "value": new_turn},
-                {"op": "set", "path": "round", "value": new_round},
-                {"op": "set", "path": "phase", "value": PHASE_WAIT_ROLL},
-                {"op": "set", "path": "prompt", "value": None},
+                op_set("current_player_id", next_player_id),
+                op_set("turn", new_turn),
+                op_set("round", new_round),
+                op_set("phase", PHASE_WAIT_ROLL),
+                op_set("pending_prompt", None),
             ]
         )
         events.append(
@@ -796,15 +799,15 @@ class GameSyncRuntime:
             }
         )
 
-    def _active_players(self, state: dict[str, Any]) -> list[dict]:
-        return sorted(
-            [
-                player
-                for player in state["players"].values()
-                if player.get("playerState") != PlayerState.BANKRUPT
-            ],
-            key=lambda player: player["turnOrder"],
-        )
+    def _winner_payload(self, player: PlayerGameState) -> dict[str, Any]:
+        return {
+            "playerId": player.player_id,
+            "nickname": player.nickname,
+            "balance": player.balance,
+        }
+
+    def _active_players(self, state: GameState) -> list[PlayerGameState]:
+        return state.active_players()
 
 
 _runtime: GameSyncRuntime | None = None
