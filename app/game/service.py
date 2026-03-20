@@ -107,7 +107,7 @@ class GameService:
         *,
         game_id: int,
         player_ids: list[int],
-        start_cash: int = 5000,
+        start_cash: int = 500000,
         max_round: int = 20,
         tiles: list[dict[str, Any]] | None = None,
         travel_destinations: list[int] | None = None,

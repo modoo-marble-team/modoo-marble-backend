@@ -9,6 +9,7 @@ from app.game.models import (
     PromptChoice,
     TileGameState,
 )
+from app.game.state import INITIAL_BALANCE
 from app.game.timer import process_turn_timeout
 
 
@@ -28,7 +29,7 @@ def make_state() -> GameState:
             1: PlayerGameState(
                 player_id=1,
                 nickname="host",
-                balance=5000,
+                balance=INITIAL_BALANCE,
                 current_tile_id=0,
                 player_state=PlayerState.NORMAL,
                 state_duration=0,
@@ -40,7 +41,7 @@ def make_state() -> GameState:
             2: PlayerGameState(
                 player_id=2,
                 nickname="guest",
-                balance=5000,
+                balance=INITIAL_BALANCE,
                 current_tile_id=0,
                 player_state=PlayerState.NORMAL,
                 state_duration=0,

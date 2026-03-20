@@ -6,6 +6,7 @@ import pytest
 
 from app.game.enums import PlayerState
 from app.game.models import GameState, PlayerGameState
+from app.game.state import INITIAL_BALANCE
 from app.game.sync_runtime import GameSyncRuntime
 
 
@@ -25,7 +26,7 @@ def make_state() -> GameState:
             1: PlayerGameState(
                 player_id=1,
                 nickname="host",
-                balance=5300,
+                balance=INITIAL_BALANCE + 30000,
                 current_tile_id=4,
                 player_state=PlayerState.NORMAL,
                 state_duration=0,

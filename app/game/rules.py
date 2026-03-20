@@ -15,9 +15,13 @@ PHASE_RESOLVING = "RESOLVING"
 PHASE_WAIT_PROMPT = "WAIT_PROMPT"
 PHASE_GAME_OVER = "GAME_OVER"
 
-SELL_REFUND_RATE_TIER_1_3 = 0.5
-SELL_REFUND_RATE_TIER_4_5 = 1.0
-SELL_REFUND_MULTIPLIER_TIER_6 = 2
+MAX_BUILDING_LEVEL = 3
+MONEY_SCALE = 100
+BUILDING_STAGE_LABELS = {
+    1: "주택",
+    2: "호텔",
+    3: "랜드마크",
+}
 
 PROMPT_TIMEOUT_SECONDS = 30
 
@@ -31,30 +35,30 @@ PROMPT_CHOICE_CANONICAL_MAP: dict[str, tuple[str, ...]] = {
 }
 
 CHANCE_EFFECTS: dict[int, tuple[str, int]] = {
-    3: ("GAIN_MONEY", 300),
-    10: ("LOSE_MONEY", 150),
-    27: ("GAIN_MONEY", 500),
+    3: ("GAIN_MONEY", 30000),
+    10: ("LOSE_MONEY", 15000),
+    27: ("GAIN_MONEY", 50000),
 }
 
 CHANCE_CARD_POOL: list[dict] = [
     {
         "type": "GAIN_MONEY",
-        "amount": 300,
+        "amount": 30000,
         "description": "보너스 300만원을 획득합니다.",
     },
     {
         "type": "GAIN_MONEY",
-        "amount": 200,
+        "amount": 20000,
         "description": "보너스 200만원을 획득합니다.",
     },
     {
         "type": "GAIN_MONEY",
-        "amount": 500,
+        "amount": 50000,
         "description": "보너스 500만원을 획득합니다.",
     },
-    {"type": "LOSE_MONEY", "amount": 150, "description": "150만원을 지불합니다."},
-    {"type": "LOSE_MONEY", "amount": 200, "description": "200만원을 지불합니다."},
-    {"type": "LOSE_MONEY", "amount": 300, "description": "300만원을 지불합니다."},
+    {"type": "LOSE_MONEY", "amount": 15000, "description": "150만원을 지불합니다."},
+    {"type": "LOSE_MONEY", "amount": 20000, "description": "200만원을 지불합니다."},
+    {"type": "LOSE_MONEY", "amount": 30000, "description": "300만원을 지불합니다."},
     {"type": "MOVE_FORWARD", "amount": 3, "description": "앞으로 3칸 이동합니다."},
     {"type": "MOVE_FORWARD", "amount": 5, "description": "앞으로 5칸 이동합니다."},
     {"type": "MOVE_BACKWARD", "amount": 2, "description": "뒤로 2칸 이동합니다."},
@@ -68,9 +72,17 @@ CHANCE_CARD_POOL: list[dict] = [
 ]
 
 EVENT_CARD_POOL: list[dict] = [
-    {"type": "GAIN_MONEY", "amount": 200, "description": "축하금 200만원을 받습니다."},
-    {"type": "GAIN_MONEY", "amount": 100, "description": "지원금 100만원을 받습니다."},
-    {"type": "LOSE_MONEY", "amount": 100, "description": "벌금 100만원을 냅니다."},
+    {
+        "type": "GAIN_MONEY",
+        "amount": 20000,
+        "description": "축하금 200만원을 받습니다.",
+    },
+    {
+        "type": "GAIN_MONEY",
+        "amount": 10000,
+        "description": "지원금 100만원을 받습니다.",
+    },
+    {"type": "LOSE_MONEY", "amount": 10000, "description": "벌금 100만원을 냅니다."},
 ]
 
 
@@ -108,6 +120,16 @@ def clear_prompt_patches(*, next_phase: str = PHASE_RESOLVING) -> list[dict]:
         op_set("pending_prompt", None),
         op_set("phase", next_phase),
     ]
+
+
+def _format_money(amount: int) -> str:
+    if amount % MONEY_SCALE == 0:
+        return f"{amount // MONEY_SCALE}만원"
+    return f"{amount / MONEY_SCALE:.2f}만원"
+
+
+def _get_build_stage_name(level: int) -> str:
+    return BUILDING_STAGE_LABELS.get(level, "건설")
 
 
 def _player_name(state: GameState, player_id: int) -> str:
@@ -243,13 +265,8 @@ def _get_sell_refund(tile_id: int, building_level: int) -> int:
         return 0
 
     refund = base_price
-    for current_level in range(1, building_level):
-        if current_level in (1, 2, 3):
-            refund += int(base_price * SELL_REFUND_RATE_TIER_1_3)
-        elif current_level in (4, 5):
-            refund += int(base_price * SELL_REFUND_RATE_TIER_4_5)
-        elif current_level == 6:
-            refund += base_price * SELL_REFUND_MULTIPLIER_TIER_6
+    for current_level in range(1, building_level + 1):
+        refund += int(TILE_MAP[tile_id].build_costs[current_level] * 0.5)
 
     return refund
 
@@ -557,7 +574,7 @@ def _apply_build(
         raise GameActionError(code="NOT_OWNER", message="내 소유의 칸이 아닙니다.")
 
     current_level = tile_state.building_level
-    if current_level >= 7:
+    if current_level >= MAX_BUILDING_LEVEL:
         raise GameActionError(
             code="INVALID_PHASE",
             message="이미 최대 단계까지 건설된 칸입니다.",
@@ -677,13 +694,12 @@ def process_buy_property_action(
             code="INVALID_TILE", message="이 칸에서는 해당 행동을 할 수 없습니다."
         )
 
-    if tile_state.owner_id is None:
+    current_tile_id = state.require_player(player_id).current_tile_id
+    if tile_state.owner_id is None and tile_id == current_tile_id:
         return _apply_purchase(state, player_id=player_id, tile_id=tile_id)
-    if tile_state.owner_id == player_id:
-        return _apply_build(state, player_id=player_id, tile_id=tile_id)
     raise GameActionError(
         code="INVALID_PHASE",
-        message="다른 플레이어의 소유 칸입니다.",
+        message="토지 구매와 건설은 도착 시 표시되는 프롬프트로만 진행할 수 있습니다.",
     )
 
 
@@ -693,12 +709,10 @@ def process_city_build_action(
     player_id: int,
     tile_id: int,
 ) -> tuple[list[dict], list[dict]]:
-    _ensure_turn_management_action_available(
-        state,
-        player_id=player_id,
-        invalid_phase_message="지금은 건설할 수 없습니다.",
+    raise GameActionError(
+        code="INVALID_PHASE",
+        message="건설은 도착한 칸에서만 프롬프트로 진행할 수 있습니다.",
     )
-    return _apply_build(state, player_id=player_id, tile_id=tile_id)
 
 
 def process_sell_property_action(
@@ -800,7 +814,10 @@ def resolve_landing(
                 prompt_type="BUY_OR_SKIP",
                 player_id=player_id,
                 title=f"{tile_def.name} 구매",
-                message=f"{tile_def.name}을(를) {tile_def.price}만원에 구매하시겠습니까?",
+                message=(
+                    f"{tile_def.name}을(를) "
+                    f"{_format_money(tile_def.price)}에 구매하시겠습니까?"
+                ),
                 choices=[
                     PromptChoice(id="buy", label="구매", value="BUY"),
                     PromptChoice(id="skip", label="건너뛰기", value="SKIP"),
@@ -821,14 +838,18 @@ def resolve_landing(
             )
             return events, patches
 
-        if owner_id == player_id and building_level < 7:
+        if owner_id == player_id and building_level < MAX_BUILDING_LEVEL:
             build_cost = tile_def.build_costs[building_level + 1]
             next_toll = _get_toll_amount(tile_id, building_level + 1)
+            next_stage_name = _get_build_stage_name(building_level + 1)
             prompt = _make_prompt(
                 prompt_type="BUILD_OR_SKIP",
                 player_id=player_id,
-                title=f"{tile_def.name} 건설",
-                message=f"{tile_def.name}에 {build_cost}만원을 내고 건설하시겠습니까?",
+                title=f"{tile_def.name} {next_stage_name} 건설",
+                message=(
+                    f"{tile_def.name}에 {next_stage_name}을(를) "
+                    f"{_format_money(build_cost)}에 건설하시겠습니까?"
+                ),
                 choices=[
                     PromptChoice(id="build", label="건설", value="BUILD"),
                     PromptChoice(id="skip", label="건너뛰기", value="SKIP"),
@@ -860,7 +881,7 @@ def resolve_landing(
                 title=f"{tile_def.name} 통행료",
                 message=(
                     f"{_player_name(state, owner_id)}님의 {tile_def.name}입니다. "
-                    f"먼저 통행료 {toll}만원을 지불한 뒤 인수 여부를 결정합니다."
+                    f"먼저 통행료 {_format_money(toll)}을 지불한 뒤 인수 여부를 결정합니다."
                 ),
                 choices=[PromptChoice(id="pay", label="확인", value="PAY_TOLL")],
                 payload={
@@ -1066,7 +1087,8 @@ def process_prompt_response(
                 title=f"{prompt.payload.get('tileName', '도시')} 인수",
                 message=(
                     f"{prompt.payload.get('ownerName', '상대')}님의 땅을 "
-                    f"{prompt.payload.get('acquisitionCost', 0)}만원에 인수하시겠습니까?"
+                    f"{_format_money(int(prompt.payload.get('acquisitionCost', 0)))}에 "
+                    "인수하시겠습니까?"
                 ),
                 choices=[
                     PromptChoice(id="acquire", label="인수하기", value="ACQUIRE"),
