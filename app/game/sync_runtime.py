@@ -91,6 +91,9 @@ class GameSyncRuntime:
     def _now_ts(self) -> float:
         return time.time()
 
+    def _disconnect_tracking_ttl_seconds(self) -> int:
+        return settings.GAME_SYNC_DISCONNECT_GRACE_SECONDS + 30
+
     async def handle_connect(self, *, sid: str, user_id: int) -> None:
         self._user_sids.setdefault(user_id, set()).add(sid)
 
@@ -361,7 +364,7 @@ class GameSyncRuntime:
         await redis.set(
             self._disconnected_at_key(game_id, player_id),
             str(disconnected_at),
-            ex=settings.GAME_SYNC_DISCONNECT_GRACE_SECONDS,
+            ex=self._disconnect_tracking_ttl_seconds(),
         )
         await redis.zadd(self._disconnect_schedule_key(shard), {member: due_at})
 

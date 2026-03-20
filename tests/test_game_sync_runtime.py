@@ -89,6 +89,27 @@ async def test_get_active_game_falls_back_to_legacy_key(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_set_disconnected_at_keeps_tracking_key_longer_than_grace(monkeypatch):
+    sio = AsyncMock()
+    runtime = GameSyncRuntime(sio)
+    captured: dict[str, int] = {}
+
+    class FakeRedis:
+        async def set(self, key: str, value: str, ex: int | None = None):
+            captured["ex"] = int(ex or 0)
+            return True
+
+        async def zadd(self, key: str, mapping: dict[str, float]):
+            return 1
+
+    monkeypatch.setattr("app.game.sync_runtime.get_redis", lambda: FakeRedis())
+
+    await runtime.set_disconnected_at(game_id="game-1", player_id=1)
+
+    assert captured["ex"] > 60
+
+
+@pytest.mark.asyncio
 async def test_remove_player_from_room_updates_lobby_count_and_host(monkeypatch):
     sio = AsyncMock()
     runtime = GameSyncRuntime(sio)
