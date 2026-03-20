@@ -784,8 +784,7 @@ def test_chance_move_card_can_chain_into_move_to_island_resolution(monkeypatch):
     apply_patches(state, patches)
 
     assert any(
-        event["type"] == "CHANCE_RESOLVED" and event["tileId"] == 27
-        for event in events
+        event["type"] == "CHANCE_RESOLVED" and event["tileId"] == 27 for event in events
     )
     assert any(
         event["type"] == "LANDED" and event["tile"]["tileId"] == 24 for event in events

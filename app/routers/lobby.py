@@ -125,7 +125,9 @@ async def leave_room(
         predicted_new_host_id: str | None = None
         if member.get("is_host"):
             remaining_players = [
-                player for player in room["players"] if player["id"] != str(auth.user_id)
+                player
+                for player in room["players"]
+                if player["id"] != str(auth.user_id)
             ]
             if remaining_players:
                 predicted_new_host_id = str(remaining_players[0]["id"])
