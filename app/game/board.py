@@ -96,4 +96,4 @@ TILE_MAP: dict[int, TileDefinition] = {tile.tile_id: tile for tile in BOARD}
 BOARD_SIZE = len(BOARD)
 ISLAND_TILE_ID = 8
 START_TILE_ID = 0
-START_SALARY = 5000_00
+START_SALARY = 700_00

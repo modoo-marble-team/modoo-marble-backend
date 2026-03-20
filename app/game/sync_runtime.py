@@ -389,6 +389,96 @@ class GameSyncRuntime:
             return None
         return float(raw)
 
+    async def leave_game(self, *, game_id: str, user_id: int) -> bool:
+        async with game_lock(game_id):
+            state = await get_game_state(game_id)
+            if state is None or state.status != "playing":
+                return False
+
+            player = state.player(user_id)
+            if player is None:
+                return False
+
+            if player.player_state == PlayerState.BANKRUPT:
+                await self._cleanup_player_game_membership(
+                    game_id=game_id,
+                    room_id=state.room_id,
+                    player_id=user_id,
+                    presence_status="lobby",
+                    leave_socket_rooms=True,
+                )
+                return True
+
+            events: list[dict[str, Any]] = []
+            patch: list[dict[str, Any]] = []
+
+            self._bankrupt_player(
+                state=state,
+                player_id=user_id,
+                events=events,
+                patch=patch,
+                reason="player_left",
+            )
+
+            alive_players = self._active_players(state)
+            if len(alive_players) <= 1:
+                winner = (
+                    self._winner_payload(state, alive_players[0])
+                    if alive_players
+                    else None
+                )
+                state.status = "finished"
+                state.phase = PHASE_GAME_OVER
+                state.pending_prompt = None
+                state.winner_id = winner["playerId"] if winner else None
+                patch.extend(
+                    [
+                        op_set("status", "finished"),
+                        op_set("phase", PHASE_GAME_OVER),
+                        op_set("pending_prompt", None),
+                        op_set("winner_id", state.winner_id),
+                    ]
+                )
+                events.append(
+                    {
+                        "type": ServerEventType.GAME_OVER,
+                        "reason": "player_left",
+                        "winner": winner,
+                    }
+                )
+            elif state.current_player_id == user_id:
+                self._advance_turn_after_forced_bankruptcy(
+                    state=state,
+                    player_id=user_id,
+                    events=events,
+                    patch=patch,
+                )
+
+            state.revision += 1
+            await save_game_state(game_id, state)
+
+            packet = await self.build_and_store_patch_packet(
+                state=state,
+                events=events,
+                patches=patch,
+                include_snapshot=False,
+            )
+
+            await self._cleanup_player_game_membership(
+                game_id=game_id,
+                room_id=state.room_id,
+                player_id=user_id,
+                presence_status="lobby",
+                leave_socket_rooms=True,
+            )
+            await self._sio.emit("game:patch", packet, room=f"game:{game_id}")
+            if state.status == "finished":
+                await self.finalize_finished_game(
+                    state,
+                    excluded_player_ids={user_id},
+                )
+            return True
+
     async def start_scheduler(self) -> None:
         if self._scheduler_task is not None and not self._scheduler_task.done():
             return
@@ -763,14 +853,11 @@ class GameSyncRuntime:
                     include_snapshot=False,
                 )
 
-                await self.clear_disconnected_at(game_id=game_id, player_id=player_id)
-                await self._remove_player_from_room(
+                await self._cleanup_player_game_membership(
+                    game_id=game_id,
                     room_id=state.room_id,
                     player_id=player_id,
                 )
-                await self.clear_active_game(user_id=player_id)
-                redis = get_redis()
-                await redis.delete(self._legacy_user_game_key(player_id))
                 await self._sio.emit("game:patch", packet, room=f"game:{game_id}")
                 if state.status == "finished":
                     await self.finalize_finished_game(state)
@@ -912,6 +999,29 @@ class GameSyncRuntime:
     def _active_players(self, state: GameState) -> list[PlayerGameState]:
         return state.active_players()
 
+    async def _cleanup_player_game_membership(
+        self,
+        *,
+        game_id: str,
+        room_id: str,
+        player_id: int,
+        presence_status: str | None = None,
+        leave_socket_rooms: bool = False,
+    ) -> None:
+        await self.clear_disconnected_at(game_id=game_id, player_id=player_id)
+        await self._remove_player_from_room(room_id=room_id, player_id=player_id)
+        await self.clear_active_game(user_id=player_id)
+        redis = get_redis()
+        await redis.delete(self._legacy_user_game_key(player_id))
+        if presence_status is not None:
+            await update_status(user_id=str(player_id), status=presence_status)
+        if leave_socket_rooms:
+            await self._leave_player_socket_rooms(
+                player_id=player_id,
+                game_id=game_id,
+                room_id=room_id,
+            )
+
     async def _remove_player_from_room(self, *, room_id: str, player_id: int) -> None:
         room_service = RoomService()
         room = await room_service.get_room(room_id)
@@ -957,12 +1067,31 @@ class GameSyncRuntime:
                     room=f"room:{room_id}",
                 )
 
-    async def finalize_finished_game(self, state: GameState) -> dict | None:
+    async def _leave_player_socket_rooms(
+        self,
+        *,
+        player_id: int,
+        game_id: str,
+        room_id: str,
+    ) -> None:
+        for sid in list(self._user_sids.get(player_id, set())):
+            await self._sio.leave_room(sid, f"game:{game_id}")
+            await self._sio.leave_room(sid, f"room:{room_id}")
+
+    async def finalize_finished_game(
+        self,
+        state: GameState,
+        *,
+        excluded_player_ids: set[int] | None = None,
+    ) -> dict | None:
         room_service = RoomService()
         redis = get_redis()
+        excluded = excluded_player_ids or set()
         player_ids = list(state.players)
         connected_player_ids = [
-            player_id for player_id in player_ids if player_id in self._user_sids
+            player_id
+            for player_id in player_ids
+            if player_id in self._user_sids and player_id not in excluded
         ]
 
         cancel_turn_timer(state.game_id)
@@ -1037,3 +1166,9 @@ async def stop_game_sync_scheduler() -> None:
     if _runtime is None:
         return
     await _runtime.stop_scheduler()
+
+
+async def leave_game_for_user(*, game_id: str, user_id: int) -> bool:
+    if _runtime is None:
+        return False
+    return await _runtime.leave_game(game_id=game_id, user_id=user_id)

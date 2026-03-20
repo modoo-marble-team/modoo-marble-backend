@@ -16,7 +16,6 @@ PHASE_WAIT_PROMPT = "WAIT_PROMPT"
 PHASE_GAME_OVER = "GAME_OVER"
 
 MAX_BUILDING_LEVEL = 3
-MONEY_SCALE = 100
 BUILDING_STAGE_LABELS = {
     1: "주택",
     2: "호텔",
@@ -142,12 +141,6 @@ def _format_money(amount: int) -> str:
 
 def _get_build_stage_name(level: int) -> str:
     return BUILDING_STAGE_LABELS.get(level, "건설")
-
-
-def _format_money(amount: int) -> str:
-    if amount % MONEY_SCALE == 0:
-        return f"{amount // MONEY_SCALE}만원"
-    return f"{amount / MONEY_SCALE:.2f}만원"
 
 
 def _get_build_stage_name(level: int) -> str:
@@ -563,6 +556,28 @@ def _queue_follow_up_landing_prompt(
 ) -> None:
     preview_state = state.clone()
     apply_patches(preview_state, patches)
+    follow_up_events, follow_up_patches = resolve_landing(
+        preview_state,
+        player_id,
+        tile_id,
+    )
+    events.extend(follow_up_events)
+    patches.extend(follow_up_patches)
+
+
+def _queue_follow_up_landing_resolution(
+    state: GameState,
+    *,
+    player_id: int,
+    tile_id: int,
+    patches: list[dict],
+    events: list[dict],
+    include_landed_event: bool,
+) -> None:
+    preview_state = state.clone()
+    apply_patches(preview_state, patches)
+    if include_landed_event:
+        _append_landed_event(events, player_id=player_id, tile_id=tile_id)
     follow_up_events, follow_up_patches = resolve_landing(
         preview_state,
         player_id,
@@ -1035,24 +1050,44 @@ def resolve_landing(
     if tile_def.tile_type == TileType.CHANCE:
         card = random.choice(CHANCE_CARD_POOL)
         card_events, card_patches = _apply_chance_card(state, player_id, card)
+        chance_event = {
+            "type": ServerEventType.CHANCE_RESOLVED,
+            "playerId": player_id,
+            "tileId": tile_id,
+            "chance": {
+                "type": card["type"],
+                "power": card.get("amount", 0),
+                "description": card["description"],
+            },
+        }
+
+        if card["type"] in {"MOVE_FORWARD", "MOVE_BACKWARD"}:
+            events.append(chance_event)
+            events.extend(card_events)
+            patches.extend(card_patches)
+
+            preview_state = state.clone()
+            apply_patches(preview_state, patches)
+            destination_tile_id = preview_state.require_player(
+                player_id
+            ).current_tile_id
+            _queue_follow_up_landing_resolution(
+                state,
+                player_id=player_id,
+                tile_id=destination_tile_id,
+                patches=patches,
+                events=events,
+                include_landed_event=True,
+            )
+            return events, patches
+
         patches.extend(card_patches)
         events.extend(card_events)
         if not any(
             event.get("type") == ServerEventType.CHANCE_RESOLVED
             for event in card_events
         ):
-            events.append(
-                {
-                    "type": ServerEventType.CHANCE_RESOLVED,
-                    "playerId": player_id,
-                    "tileId": tile_id,
-                    "chance": {
-                        "type": card["type"],
-                        "power": card.get("amount", 0),
-                        "description": card["description"],
-                    },
-                }
-            )
+            events.append(chance_event)
         return events, patches
 
     if tile_def.tile_type == TileType.AI:

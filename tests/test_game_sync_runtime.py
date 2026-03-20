@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from copy import deepcopy
 from unittest.mock import AsyncMock, Mock
 
@@ -314,6 +315,201 @@ async def test_reconcile_playing_rooms_on_startup_cleans_stale_room(monkeypatch)
     assert sio.emit.await_args_list[-1].args == (
         "lobby_updated",
         {"action": "removed", "room": {"id": "room-1"}},
+    )
+
+
+@pytest.mark.asyncio
+async def test_leave_game_immediately_bankrupts_and_cleans_membership(monkeypatch):
+    sio = AsyncMock()
+    runtime = GameSyncRuntime(sio)
+    runtime._user_sids[1] = {"sid-1"}
+    state = GameState(
+        game_id="game-1",
+        room_id="room-1",
+        revision=4,
+        turn=2,
+        round=1,
+        current_player_id=1,
+        status="playing",
+        phase="WAIT_ROLL",
+        pending_prompt=None,
+        winner_id=None,
+        players={
+            1: PlayerGameState(
+                player_id=1,
+                nickname="host",
+                balance=INITIAL_BALANCE,
+                current_tile_id=0,
+                player_state=PlayerState.NORMAL,
+                state_duration=0,
+                consecutive_doubles=0,
+                owned_tiles=[],
+                building_levels={},
+                turn_order=0,
+            ),
+            2: PlayerGameState(
+                player_id=2,
+                nickname="guest",
+                balance=INITIAL_BALANCE,
+                current_tile_id=0,
+                player_state=PlayerState.NORMAL,
+                state_duration=0,
+                consecutive_doubles=0,
+                owned_tiles=[],
+                building_levels={},
+                turn_order=1,
+            ),
+            3: PlayerGameState(
+                player_id=3,
+                nickname="third",
+                balance=INITIAL_BALANCE,
+                current_tile_id=0,
+                player_state=PlayerState.NORMAL,
+                state_duration=0,
+                consecutive_doubles=0,
+                owned_tiles=[],
+                building_levels={},
+                turn_order=2,
+            ),
+        },
+        tiles={},
+    )
+
+    @asynccontextmanager
+    async def fake_game_lock(_game_id: str):
+        yield
+
+    save_game_state = AsyncMock()
+    cleanup_membership = AsyncMock()
+    finalize_finished_game = AsyncMock()
+
+    monkeypatch.setattr("app.game.sync_runtime.game_lock", fake_game_lock)
+    monkeypatch.setattr(
+        "app.game.sync_runtime.get_game_state",
+        AsyncMock(return_value=state),
+    )
+    monkeypatch.setattr("app.game.sync_runtime.save_game_state", save_game_state)
+    monkeypatch.setattr(
+        runtime,
+        "build_and_store_patch_packet",
+        AsyncMock(
+            return_value={
+                "gameId": "game-1",
+                "revision": 5,
+                "turn": 3,
+                "events": [],
+                "patch": [],
+                "snapshot": None,
+            }
+        ),
+    )
+    monkeypatch.setattr(runtime, "_cleanup_player_game_membership", cleanup_membership)
+    monkeypatch.setattr(runtime, "finalize_finished_game", finalize_finished_game)
+
+    left = await runtime.leave_game(game_id="game-1", user_id=1)
+
+    assert left is True
+    assert state.revision == 5
+    assert state.require_player(1).player_state == PlayerState.BANKRUPT
+    assert state.current_player_id == 2
+    save_game_state.assert_awaited_once_with("game-1", state)
+    cleanup_membership.assert_awaited_once_with(
+        game_id="game-1",
+        room_id="room-1",
+        player_id=1,
+        presence_status="lobby",
+        leave_socket_rooms=True,
+    )
+    finalize_finished_game.assert_not_awaited()
+    assert any(
+        call.args
+        and call.args[0] == "game:patch"
+        and call.kwargs == {"room": "game:game-1"}
+        for call in sio.emit.await_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_leave_game_finishes_game_and_excludes_departed_player_from_finalize(
+    monkeypatch,
+):
+    sio = AsyncMock()
+    runtime = GameSyncRuntime(sio)
+    runtime._user_sids[1] = {"sid-1"}
+    state = GameState(
+        game_id="game-1",
+        room_id="room-1",
+        revision=1,
+        turn=1,
+        round=1,
+        current_player_id=1,
+        status="playing",
+        phase="WAIT_ROLL",
+        pending_prompt=None,
+        winner_id=None,
+        players={
+            1: PlayerGameState(
+                player_id=1,
+                nickname="host",
+                balance=INITIAL_BALANCE,
+                current_tile_id=0,
+                player_state=PlayerState.NORMAL,
+                state_duration=0,
+                consecutive_doubles=0,
+                owned_tiles=[],
+                building_levels={},
+                turn_order=0,
+            ),
+            2: PlayerGameState(
+                player_id=2,
+                nickname="guest",
+                balance=INITIAL_BALANCE,
+                current_tile_id=0,
+                player_state=PlayerState.BANKRUPT,
+                state_duration=0,
+                consecutive_doubles=0,
+                owned_tiles=[],
+                building_levels={},
+                turn_order=1,
+            ),
+        },
+        tiles={},
+    )
+
+    @asynccontextmanager
+    async def fake_game_lock(_game_id: str):
+        yield
+
+    monkeypatch.setattr("app.game.sync_runtime.game_lock", fake_game_lock)
+    monkeypatch.setattr(
+        "app.game.sync_runtime.get_game_state",
+        AsyncMock(return_value=state),
+    )
+    monkeypatch.setattr("app.game.sync_runtime.save_game_state", AsyncMock())
+    monkeypatch.setattr(
+        runtime,
+        "build_and_store_patch_packet",
+        AsyncMock(
+            return_value={
+                "gameId": "game-1",
+                "revision": 2,
+                "turn": 1,
+                "events": [],
+                "patch": [],
+                "snapshot": None,
+            }
+        ),
+    )
+    monkeypatch.setattr(runtime, "_cleanup_player_game_membership", AsyncMock())
+    finalize_finished_game = AsyncMock()
+    monkeypatch.setattr(runtime, "finalize_finished_game", finalize_finished_game)
+
+    left = await runtime.leave_game(game_id="game-1", user_id=1)
+
+    assert left is True
+    finalize_finished_game.assert_awaited_once_with(
+        state,
+        excluded_player_ids={1},
     )
 
 
