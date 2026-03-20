@@ -727,3 +727,75 @@ def test_chance_card_lose_money_decreases_balance(monkeypatch):
 
     assert state.require_player(1).balance == INITIAL_BALANCE - 15000
     assert any(event["type"] == "CHANCE_RESOLVED" for event in events)
+
+
+def test_chance_move_card_resolves_before_move_and_chains_into_property_prompt(
+    monkeypatch,
+):
+    state = make_state()
+    state.require_player(1).current_tile_id = 3
+
+    monkeypatch.setattr(
+        "app.game.rules.random.choice",
+        lambda _pool: {
+            "type": "MOVE_BACKWARD",
+            "amount": 2,
+            "description": "뒤로 2칸 이동합니다.",
+        },
+    )
+
+    events, patches = resolve_landing(state, 1, 3)
+    apply_patches(state, patches)
+
+    chance_index = next(
+        index
+        for index, event in enumerate(events)
+        if event["type"] == "CHANCE_RESOLVED"
+    )
+    move_index = next(
+        index
+        for index, event in enumerate(events)
+        if event["type"] == "PLAYER_MOVED" and event.get("trigger") == "chance"
+    )
+
+    assert chance_index < move_index
+    assert any(
+        event["type"] == "LANDED" and event["tile"]["tileId"] == 1 for event in events
+    )
+    assert state.require_player(1).current_tile_id == 1
+    assert state.pending_prompt is not None
+    assert state.pending_prompt.type == "BUY_OR_SKIP"
+
+
+def test_chance_move_card_can_chain_into_move_to_island_resolution(monkeypatch):
+    state = make_state()
+    state.require_player(1).current_tile_id = 27
+
+    monkeypatch.setattr(
+        "app.game.rules.random.choice",
+        lambda _pool: {
+            "type": "MOVE_BACKWARD",
+            "amount": 3,
+            "description": "뒤로 3칸 이동합니다.",
+        },
+    )
+
+    events, patches = resolve_landing(state, 1, 27)
+    apply_patches(state, patches)
+
+    assert any(
+        event["type"] == "CHANCE_RESOLVED" and event["tileId"] == 27
+        for event in events
+    )
+    assert any(
+        event["type"] == "LANDED" and event["tile"]["tileId"] == 24 for event in events
+    )
+    assert any(
+        event["type"] == "PLAYER_MOVED"
+        and event.get("trigger") == "move_to_island"
+        and event["toTileId"] == 8
+        for event in events
+    )
+    assert state.require_player(1).current_tile_id == 8
+    assert state.require_player(1).player_state == PlayerState.LOCKED
+    assert state.require_player(1).state_duration == 3
