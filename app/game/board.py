@@ -40,6 +40,7 @@ _TIER_BUILD_COSTS = {
     5: [1700_00, 2800_00, 5300_00, 5600_00],
 }
 
+
 def _prop(tile_id: int, name: str, tier: int) -> TileDefinition:
     return TileDefinition(
         tile_id=tile_id,

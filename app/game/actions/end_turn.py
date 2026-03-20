@@ -30,7 +30,9 @@ def get_next_player_id(state: GameState, current_player_id: int) -> int:
 def _find_winner(state: GameState) -> dict:
     winner = find_winner_by_assets(state)
     if winner is None:
-        raise GameActionError(code="INVALID_PHASE", message="승자를 계산할 수 없습니다.")
+        raise GameActionError(
+            code="INVALID_PHASE", message="승자를 계산할 수 없습니다."
+        )
     return winner
 
 

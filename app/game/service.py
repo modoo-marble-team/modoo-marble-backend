@@ -48,7 +48,9 @@ class LastSurvivorVictoryCondition:
         }
 
 
-def _legacy_player_total_assets(*, state: dict[str, Any], player: dict[str, Any]) -> int:
+def _legacy_player_total_assets(
+    *, state: dict[str, Any], player: dict[str, Any]
+) -> int:
     player_id = int(player["userId"])
     total_assets = int(player.get("balance", 0))
 
@@ -63,7 +65,9 @@ def _legacy_player_total_assets(*, state: dict[str, Any], player: dict[str, Any]
             continue
 
         building_level = int(tile.get("buildingLevel", 0))
-        total_assets += tile_def.price + sum(tile_def.build_costs[1 : building_level + 1])
+        total_assets += tile_def.price + sum(
+            tile_def.build_costs[1 : building_level + 1]
+        )
 
     return total_assets
 

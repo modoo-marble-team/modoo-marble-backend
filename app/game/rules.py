@@ -79,20 +79,22 @@ EVENT_CARD_POOL: list[dict] = [
     {"type": "LOSE_MONEY", "amount": 10000, "description": "벌금 1억원을 냅니다."},
 ]
 
+
 def get_object_particle(word: str) -> str:
-	if not word:
-		return "를"
+    if not word:
+        return "를"
 
-	last_char = word[-1]
-	code = ord(last_char)
+    last_char = word[-1]
+    code = ord(last_char)
 
-	# 한글 음절 범위: 가 ~ 힣
-	if 0xAC00 <= code <= 0xD7A3:
-		has_batchim = (code - 0xAC00) % 28 != 0
-		return "을" if has_batchim else "를"
+    # 한글 음절 범위: 가 ~ 힣
+    if 0xAC00 <= code <= 0xD7A3:
+        has_batchim = (code - 0xAC00) % 28 != 0
+        return "을" if has_batchim else "를"
 
-	# 한글이 아니면 보통 받침 없음으로 처리
-	return "를"
+    # 한글이 아니면 보통 받침 없음으로 처리
+    return "를"
+
 
 def serialize_prompt(prompt: PendingPrompt | None) -> dict | None:
     if prompt is None:
@@ -272,7 +274,9 @@ def _append_game_over_if_last_survivor(
 
     winner = active_players[0] if active_players else None
     winner_payload = (
-        None if winner is None else build_winner_payload(preview_state, winner.player_id)
+        None
+        if winner is None
+        else build_winner_payload(preview_state, winner.player_id)
     )
 
     patches.extend(
@@ -885,7 +889,7 @@ def resolve_landing(
                     "buildingLevel": building_level,
                 },
                 default_choice_value="SKIP",
-        )
+            )
             patches.extend(
                 [
                     op_set("pending_prompt", prompt),

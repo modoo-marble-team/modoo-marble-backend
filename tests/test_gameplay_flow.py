@@ -637,7 +637,10 @@ def test_max_rounds_uses_total_assets_for_winner():
     assert len(game_over_events) == 1
     assert game_over_events[0]["reason"] == "max_rounds"
     assert game_over_events[0]["winner"]["playerId"] == 1
-    assert game_over_events[0]["winner"]["assets"] == 300000 + tile.price + tile.build_costs[1] + tile.build_costs[2]
+    assert (
+        game_over_events[0]["winner"]["assets"]
+        == 300000 + tile.price + tile.build_costs[1] + tile.build_costs[2]
+    )
     assert state.winner_id == 1
     assert state.status == "finished"
 
