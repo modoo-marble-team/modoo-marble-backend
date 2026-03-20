@@ -16,7 +16,6 @@ PHASE_WAIT_PROMPT = "WAIT_PROMPT"
 PHASE_GAME_OVER = "GAME_OVER"
 
 MAX_BUILDING_LEVEL = 3
-MONEY_SCALE = 100
 BUILDING_STAGE_LABELS = {
     1: "주택",
     2: "호텔",
@@ -34,31 +33,25 @@ PROMPT_CHOICE_CANONICAL_MAP: dict[str, tuple[str, ...]] = {
     "TRAVEL_SELECT": ("CONFIRM", "SKIP"),
 }
 
-CHANCE_EFFECTS: dict[int, tuple[str, int]] = {
-    3: ("GAIN_MONEY", 30000),
-    10: ("LOSE_MONEY", 15000),
-    27: ("GAIN_MONEY", 50000),
-}
-
 CHANCE_CARD_POOL: list[dict] = [
     {
         "type": "GAIN_MONEY",
         "amount": 30000,
-        "description": "보너스 300만원을 획득합니다.",
+        "description": "보너스 3억원을 획득합니다.",
     },
     {
         "type": "GAIN_MONEY",
         "amount": 20000,
-        "description": "보너스 200만원을 획득합니다.",
+        "description": "보너스 2억원을 획득합니다.",
     },
     {
         "type": "GAIN_MONEY",
-        "amount": 50000,
-        "description": "보너스 500만원을 획득합니다.",
+        "amount": 10000,
+        "description": "보너스 1억원을 획득합니다.",
     },
-    {"type": "LOSE_MONEY", "amount": 15000, "description": "150만원을 지불합니다."},
-    {"type": "LOSE_MONEY", "amount": 20000, "description": "200만원을 지불합니다."},
-    {"type": "LOSE_MONEY", "amount": 30000, "description": "300만원을 지불합니다."},
+    {"type": "LOSE_MONEY", "amount": 15000, "description": "1억5천만원을 지불합니다."},
+    {"type": "LOSE_MONEY", "amount": 20000, "description": "2억원을 지불합니다."},
+    {"type": "LOSE_MONEY", "amount": 30000, "description": "3억원을 지불합니다."},
     {"type": "MOVE_FORWARD", "amount": 3, "description": "앞으로 3칸 이동합니다."},
     {"type": "MOVE_FORWARD", "amount": 5, "description": "앞으로 5칸 이동합니다."},
     {"type": "MOVE_BACKWARD", "amount": 2, "description": "뒤로 2칸 이동합니다."},
@@ -75,14 +68,14 @@ EVENT_CARD_POOL: list[dict] = [
     {
         "type": "GAIN_MONEY",
         "amount": 20000,
-        "description": "축하금 200만원을 받습니다.",
+        "description": "축하금 2억원을 받습니다.",
     },
     {
         "type": "GAIN_MONEY",
         "amount": 10000,
-        "description": "지원금 100만원을 받습니다.",
+        "description": "지원금 1억원을 받습니다.",
     },
-    {"type": "LOSE_MONEY", "amount": 10000, "description": "벌금 100만원을 냅니다."},
+    {"type": "LOSE_MONEY", "amount": 10000, "description": "벌금 1억원을 냅니다."},
 ]
 
 
@@ -123,9 +116,11 @@ def clear_prompt_patches(*, next_phase: str = PHASE_RESOLVING) -> list[dict]:
 
 
 def _format_money(amount: int) -> str:
-    if amount % MONEY_SCALE == 0:
-        return f"{amount // MONEY_SCALE}만원"
-    return f"{amount / MONEY_SCALE:.2f}만원"
+    if amount >= 10000:
+        r = f"{amount // 10000}억"
+        if amount % 10000 > 0:
+            r += f" {amount % 10000}만"
+    return f"{amount}만"
 
 
 def _get_build_stage_name(level: int) -> str:
@@ -816,7 +811,7 @@ def resolve_landing(
                 title=f"{tile_def.name} 구매",
                 message=(
                     f"{tile_def.name}을(를) "
-                    f"{_format_money(tile_def.price)}에 구매하시겠습니까?"
+                    f"{_format_money(tile_def.price)}원에 구매하시겠습니까?"
                 ),
                 choices=[
                     PromptChoice(id="buy", label="구매", value="BUY"),
@@ -848,7 +843,7 @@ def resolve_landing(
                 title=f"{tile_def.name} {next_stage_name} 건설",
                 message=(
                     f"{tile_def.name}에 {next_stage_name}을(를) "
-                    f"{_format_money(build_cost)}에 건설하시겠습니까?"
+                    f"{_format_money(build_cost)}원에 건설하시겠습니까?"
                 ),
                 choices=[
                     PromptChoice(id="build", label="건설", value="BUILD"),
@@ -881,7 +876,7 @@ def resolve_landing(
                 title=f"{tile_def.name} 통행료",
                 message=(
                     f"{_player_name(state, owner_id)}님의 {tile_def.name}입니다. "
-                    f"먼저 통행료 {_format_money(toll)}을 지불한 뒤 인수 여부를 결정합니다."
+                    f"먼저 통행료 {_format_money(toll)}원을 지불한 뒤 인수 여부를 결정합니다."
                 ),
                 choices=[PromptChoice(id="pay", label="확인", value="PAY_TOLL")],
                 payload={
@@ -1087,7 +1082,7 @@ def process_prompt_response(
                 title=f"{prompt.payload.get('tileName', '도시')} 인수",
                 message=(
                     f"{prompt.payload.get('ownerName', '상대')}님의 땅을 "
-                    f"{_format_money(int(prompt.payload.get('acquisitionCost', 0)))}에 "
+                    f"{_format_money(int(prompt.payload.get('acquisitionCost', 0)))}원에 "
                     "인수하시겠습니까?"
                 ),
                 choices=[
