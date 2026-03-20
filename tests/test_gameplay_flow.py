@@ -13,7 +13,7 @@ from app.game.rules import (
     process_sell_property_action,
     resolve_landing,
 )
-from app.game.state import apply_patches
+from app.game.state import INITIAL_BALANCE, apply_patches
 
 
 def make_state() -> GameState:
@@ -32,7 +32,7 @@ def make_state() -> GameState:
             1: PlayerGameState(
                 player_id=1,
                 nickname="host",
-                balance=5000,
+                balance=INITIAL_BALANCE,
                 current_tile_id=0,
                 player_state=PlayerState.NORMAL,
                 state_duration=0,
@@ -44,7 +44,7 @@ def make_state() -> GameState:
             2: PlayerGameState(
                 player_id=2,
                 nickname="guest",
-                balance=5000,
+                balance=INITIAL_BALANCE,
                 current_tile_id=0,
                 player_state=PlayerState.NORMAL,
                 state_duration=0,
@@ -74,7 +74,7 @@ def test_minimum_gameplay_turn_rotation(monkeypatch):
         "app.game.rules.random.choice",
         lambda _pool: {
             "type": "GAIN_MONEY",
-            "amount": 100,
+            "amount": 10000,
             "description": "test bonus",
         },
     )
@@ -127,7 +127,7 @@ def test_property_landing_creates_buy_prompt_and_purchase(monkeypatch):
 
     assert any(event["type"] == "BOUGHT_PROPERTY" for event in prompt_events)
     assert state.tile(4).owner_id == 1
-    assert state.require_player(1).balance == 5000 - tile.price
+    assert state.require_player(1).balance == INITIAL_BALANCE - tile.price
     assert state.require_player(1).owned_tiles == [4]
     assert state.pending_prompt is not None
     assert state.pending_prompt.type == "BUILD_OR_SKIP"
@@ -196,7 +196,10 @@ def test_property_purchase_can_chain_into_build_prompt(monkeypatch):
     assert state.tile(4).owner_id == 1
     assert state.tile(4).building_level == 1
     assert state.require_player(1).building_levels == {4: 1}
-    assert state.require_player(1).balance == 5000 - tile.price - tile.build_costs[1]
+    assert (
+        state.require_player(1).balance
+        == INITIAL_BALANCE - tile.price - tile.build_costs[1]
+    )
     assert end_events[0]["type"] == "TURN_ENDED"
     assert state.current_player_id == 2
 
@@ -226,7 +229,7 @@ def test_property_landing_skip_does_not_transfer_ownership(monkeypatch):
     apply_patches(state, prompt_patches)
 
     assert state.tile(4).owner_id is None
-    assert state.require_player(1).balance == 5000
+    assert state.require_player(1).balance == INITIAL_BALANCE
     assert not any(event["type"] == "BOUGHT_PROPERTY" for event in prompt_events)
 
 
@@ -261,8 +264,8 @@ def test_owned_property_landing_prompts_for_toll_before_acquisition(monkeypatch)
     apply_patches(state, prompt_patches)
 
     assert any(event["type"] == "PAID_TOLL" for event in prompt_events)
-    assert state.require_player(1).balance == 5000 + tile.tolls[0]
-    assert state.require_player(2).balance == 5000 - tile.tolls[0]
+    assert state.require_player(1).balance == INITIAL_BALANCE + tile.tolls[0]
+    assert state.require_player(2).balance == INITIAL_BALANCE - tile.tolls[0]
     assert state.pending_prompt is not None
     assert state.pending_prompt.type == "ACQUISITION_OR_SKIP"
     assert state.phase == "WAIT_PROMPT"
@@ -320,10 +323,18 @@ def test_owned_property_landing_can_acquire_full_property_with_buildings(monkeyp
     assert state.tile(4).owner_id == 2
     assert state.tile(4).building_level == 2
     assert state.require_player(1).balance == (
-        5000 + tile.tolls[2] + tile.price + tile.build_costs[1] + tile.build_costs[2]
+        INITIAL_BALANCE
+        + tile.tolls[2]
+        + tile.price
+        + tile.build_costs[1]
+        + tile.build_costs[2]
     )
     assert state.require_player(2).balance == (
-        5000 - tile.tolls[2] - tile.price - tile.build_costs[1] - tile.build_costs[2]
+        INITIAL_BALANCE
+        - tile.tolls[2]
+        - tile.price
+        - tile.build_costs[1]
+        - tile.build_costs[2]
     )
     assert state.require_player(1).owned_tiles == []
     assert state.require_player(1).building_levels == {}
@@ -377,8 +388,8 @@ def test_owned_property_landing_skip_pays_toll_without_transfer(monkeypatch):
     assert prompt_events == []
     assert not any(event["type"] == "ACQUIRED_PROPERTY" for event in prompt_events)
     assert state.tile(4).owner_id == 1
-    assert state.require_player(1).balance == 5000 + tile.tolls[2]
-    assert state.require_player(2).balance == 5000 - tile.tolls[2]
+    assert state.require_player(1).balance == INITIAL_BALANCE + tile.tolls[2]
+    assert state.require_player(2).balance == INITIAL_BALANCE - tile.tolls[2]
 
 
 def test_property_acquisition_requires_enough_balance(monkeypatch):
@@ -387,7 +398,7 @@ def test_property_acquisition_requires_enough_balance(monkeypatch):
     state.tile(4).building_level = 2
     state.require_player(1).owned_tiles = [4]
     state.require_player(1).building_levels = {4: 2}
-    state.require_player(2).balance = 700
+    state.require_player(2).balance = 70000
     state.current_player_id = 2
     dice_values = iter([2, 2])
 
@@ -485,31 +496,31 @@ def test_sell_property_action_refunds_money_and_releases_tile():
     apply_patches(state, patches)
 
     assert any(event["type"] == "SOLD_PROPERTY" for event in events)
-    assert state.require_player(1).balance == 5000 + tile.price
+    assert state.require_player(1).balance == INITIAL_BALANCE + tile.price
     assert state.tile(4).owner_id is None
     assert state.require_player(1).owned_tiles == []
 
 
-def test_city_build_action_upgrades_owned_tile_without_ending_turn():
+def test_city_build_action_is_rejected_outside_landing_prompt():
     state = make_state()
-    tile = TILE_MAP[4]
     state.tile(4).owner_id = 1
     state.require_player(1).owned_tiles = [4]
     state.require_player(1).building_levels = {4: 0}
 
-    events, patches = process_city_build_action(
-        state,
-        player_id=1,
-        tile_id=4,
-    )
-    apply_patches(state, patches)
+    try:
+        process_city_build_action(
+            state,
+            player_id=1,
+            tile_id=4,
+        )
+    except GameActionError as exc:
+        assert exc.code == "INVALID_PHASE"
+    else:
+        raise AssertionError("CITY_BUILD should be rejected outside landing prompt")
 
-    assert any(event["type"] == "BOUGHT_PROPERTY" for event in events)
-    assert state.require_player(1).balance == 5000 - tile.build_costs[1]
-    assert state.tile(4).building_level == 1
-    assert state.require_player(1).building_levels == {4: 1}
-    assert state.current_player_id == 1
-    assert state.phase == "WAIT_ROLL"
+    assert state.require_player(1).balance == INITIAL_BALANCE
+    assert state.tile(4).building_level == 0
+    assert state.require_player(1).building_levels == {4: 0}
 
 
 def test_travel_prompt_moves_to_selected_tile_and_chains_into_tile_prompt():
@@ -545,7 +556,7 @@ def test_bankrupt_player_is_skipped_in_turn_order(monkeypatch):
     state.players[3] = PlayerGameState(
         player_id=3,
         nickname="third",
-        balance=5000,
+        balance=INITIAL_BALANCE,
         current_tile_id=0,
         player_state=PlayerState.NORMAL,
         state_duration=0,
@@ -600,14 +611,22 @@ def test_last_player_standing_triggers_game_over():
     ]
     assert len(game_over_events) == 1
     assert game_over_events[0]["reason"] == "last_player_standing"
+    assert game_over_events[0]["winner"]["assets"] == INITIAL_BALANCE
     assert state.status == "finished"
 
 
-def test_max_rounds_triggers_game_over_exactly_once():
+def test_max_rounds_uses_total_assets_for_winner():
     state = make_state()
+    tile = TILE_MAP[4]
     state.round = MAX_ROUNDS
     state.current_player_id = 2
     state.phase = "RESOLVING"
+    state.require_player(1).balance = 300000
+    state.tile(4).owner_id = 1
+    state.tile(4).building_level = 2
+    state.require_player(1).owned_tiles = [4]
+    state.require_player(1).building_levels = {4: 2}
+    state.require_player(2).balance = 450000
 
     events, patches = process_end_turn(state, 2)
     apply_patches(state, patches)
@@ -617,6 +636,12 @@ def test_max_rounds_triggers_game_over_exactly_once():
     ]
     assert len(game_over_events) == 1
     assert game_over_events[0]["reason"] == "max_rounds"
+    assert game_over_events[0]["winner"]["playerId"] == 1
+    assert (
+        game_over_events[0]["winner"]["assets"]
+        == 300000 + tile.price + tile.build_costs[1] + tile.build_costs[2]
+    )
+    assert state.winner_id == 1
     assert state.status == "finished"
 
 
@@ -672,7 +697,7 @@ def test_chance_card_gain_money_increases_balance(monkeypatch):
         "app.game.rules.random.choice",
         lambda _pool: {
             "type": "GAIN_MONEY",
-            "amount": 300,
+            "amount": 30000,
             "description": "jackpot",
         },
     )
@@ -680,7 +705,7 @@ def test_chance_card_gain_money_increases_balance(monkeypatch):
     events, patches = resolve_landing(state, 1, 3)
     apply_patches(state, patches)
 
-    assert state.require_player(1).balance == 5300
+    assert state.require_player(1).balance == INITIAL_BALANCE + 30000
     assert any(event["type"] == "CHANCE_RESOLVED" for event in events)
 
 
@@ -692,7 +717,7 @@ def test_chance_card_lose_money_decreases_balance(monkeypatch):
         "app.game.rules.random.choice",
         lambda _pool: {
             "type": "LOSE_MONEY",
-            "amount": 150,
+            "amount": 15000,
             "description": "fine",
         },
     )
@@ -700,5 +725,5 @@ def test_chance_card_lose_money_decreases_balance(monkeypatch):
     events, patches = resolve_landing(state, 1, 3)
     apply_patches(state, patches)
 
-    assert state.require_player(1).balance == 4850
+    assert state.require_player(1).balance == INITIAL_BALANCE - 15000
     assert any(event["type"] == "CHANCE_RESOLVED" for event in events)

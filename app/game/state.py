@@ -13,7 +13,7 @@ from app.redis_client import get_redis
 
 GAME_STATE_TTL = 86400
 GAME_LOCK_TIMEOUT = 5
-INITIAL_BALANCE = 5000
+INITIAL_BALANCE = 500000
 
 
 def _game_key(game_id: str) -> str:
