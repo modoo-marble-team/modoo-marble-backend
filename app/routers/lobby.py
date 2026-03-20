@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, Request
 
+from app.errors import ApiError
 from app.game.presentation import serialize_game_snapshot
+from app.game.sync_runtime import leave_game_for_user
 from app.game.timer import start_turn_timer
 from app.schemas.lobby import (
     CreateRoomRequest,
@@ -92,6 +94,51 @@ async def leave_room(
     request: Request,
     auth: AuthUser = Depends(get_auth_user),
 ) -> dict:
+    room = await room_service.get_room(room_id)
+    if room is None:
+        raise ApiError(
+            status_code=404,
+            code="ROOM_NOT_FOUND",
+            message="방을 찾을 수 없습니다.",
+        )
+
+    member = next(
+        (player for player in room["players"] if player["id"] == str(auth.user_id)),
+        None,
+    )
+    if member is None:
+        raise ApiError(
+            status_code=403,
+            code="NOT_ROOM_MEMBER",
+            message="방 멤버가 아닙니다.",
+        )
+
+    if room["status"] == "playing":
+        game_id = str(room.get("game_id") or "")
+        if not game_id:
+            raise ApiError(
+                status_code=409,
+                code="GAME_NOT_PLAYING",
+                message="진행 중인 게임이 아닙니다.",
+            )
+
+        predicted_new_host_id: str | None = None
+        if member.get("is_host"):
+            remaining_players = [
+                player for player in room["players"] if player["id"] != str(auth.user_id)
+            ]
+            if remaining_players:
+                predicted_new_host_id = str(remaining_players[0]["id"])
+
+        left = await leave_game_for_user(game_id=game_id, user_id=auth.user_id)
+        if not left:
+            raise ApiError(
+                status_code=409,
+                code="GAME_LEAVE_FAILED",
+                message="게임 나가기를 처리할 수 없습니다.",
+            )
+        return {"success": True, "new_host_id": predicted_new_host_id}
+
     room, new_host_id = await room_service.leave_room(
         room_id=room_id,
         user_id=auth.user_id,
