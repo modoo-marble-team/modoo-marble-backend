@@ -295,7 +295,7 @@ async def test_game_action_joins_game_room_before_broadcast(monkeypatch):
         "app.game.socket_handlers.save_game_state", fake_save_game_state
     )
     monkeypatch.setattr(
-        "app.game.socket_handlers.process_roll_dice", fake_process_roll_dice
+        "app.game.actions.dispatch.process_roll_dice", fake_process_roll_dice
     )
     monkeypatch.setattr(
         "app.game.socket_handlers.start_turn_timer", lambda *_args: None
