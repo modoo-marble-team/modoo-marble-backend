@@ -12,22 +12,14 @@ from app.models.user import User
 from app.models.user_game import UserGame
 from app.presence import update_status
 from app.redis_client import get_redis
+from app.utils.redis_keys import RedisKeys
 
-ROOMS_INDEX_KEY = "rooms:index"
 ROOM_TTL_SECONDS = 60 * 60 * 24
 MAX_CHAT_MESSAGES = 100
 
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
-
-
-def _room_key(room_id: str) -> str:
-    return f"room:{room_id}"
-
-
-def _user_room_key(user_id: int) -> str:
-    return f"user:{user_id}:room"
 
 
 class RoomService:
@@ -44,17 +36,19 @@ class RoomService:
     async def _save_room(self, room: dict) -> None:
         redis = get_redis()
         room["updated_at"] = _now_iso()
-        await redis.set(_room_key(room["id"]), json.dumps(room), ex=ROOM_TTL_SECONDS)
-        await redis.sadd(ROOMS_INDEX_KEY, room["id"])
+        await redis.set(
+            RedisKeys.room(room["id"]), json.dumps(room), ex=ROOM_TTL_SECONDS
+        )
+        await redis.sadd(RedisKeys.rooms_index(), room["id"])
 
     async def _delete_room(self, room_id: str) -> None:
         redis = get_redis()
-        await redis.delete(_room_key(room_id))
-        await redis.srem(ROOMS_INDEX_KEY, room_id)
+        await redis.delete(RedisKeys.room(room_id))
+        await redis.srem(RedisKeys.rooms_index(), room_id)
 
     async def get_room(self, room_id: str) -> dict | None:
         redis = get_redis()
-        raw = await redis.get(_room_key(room_id))
+        raw = await redis.get(RedisKeys.room(room_id))
         if raw is None:
             return None
         return json.loads(raw)
@@ -71,15 +65,15 @@ class RoomService:
 
     async def _get_user_room_id(self, user_id: int) -> str | None:
         redis = get_redis()
-        return await redis.get(_user_room_key(user_id))
+        return await redis.get(RedisKeys.user_room(user_id))
 
     async def _set_user_room_id(self, user_id: int, room_id: str) -> None:
         redis = get_redis()
-        await redis.set(_user_room_key(user_id), room_id, ex=ROOM_TTL_SECONDS)
+        await redis.set(RedisKeys.user_room(user_id), room_id, ex=ROOM_TTL_SECONDS)
 
     async def _clear_user_room_id(self, user_id: int) -> None:
         redis = get_redis()
-        await redis.delete(_user_room_key(user_id))
+        await redis.delete(RedisKeys.user_room(user_id))
 
     def _host_player(self, room: dict) -> dict:
         for player in room["players"]:
@@ -136,13 +130,13 @@ class RoomService:
         keyword: str | None,
     ) -> list[dict]:
         redis = get_redis()
-        room_ids = sorted(await redis.smembers(ROOMS_INDEX_KEY))
+        room_ids = sorted(await redis.smembers(RedisKeys.rooms_index()))
         rooms: list[dict] = []
 
         for room_id in room_ids:
             room = await self.get_room(room_id)
             if room is None:
-                await redis.srem(ROOMS_INDEX_KEY, room_id)
+                await redis.srem(RedisKeys.rooms_index(), room_id)
                 continue
             if status and room["status"] != status:
                 continue
@@ -396,7 +390,7 @@ class RoomService:
         redis = get_redis()
         for player_id in player_ids:
             await redis.set(
-                f"user:{player_id}:game",
+                RedisKeys.user_game(player_id),
                 str(game.id),
                 ex=ROOM_TTL_SECONDS,
             )
