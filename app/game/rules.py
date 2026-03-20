@@ -1068,7 +1068,9 @@ def resolve_landing(
 
             preview_state = state.clone()
             apply_patches(preview_state, patches)
-            destination_tile_id = preview_state.require_player(player_id).current_tile_id
+            destination_tile_id = preview_state.require_player(
+                player_id
+            ).current_tile_id
             _queue_follow_up_landing_resolution(
                 state,
                 player_id=player_id,
