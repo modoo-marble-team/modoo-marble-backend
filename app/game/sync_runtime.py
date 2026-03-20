@@ -21,6 +21,7 @@ from app.game.timer import cancel_turn_timer
 from app.presence import update_status
 from app.redis_client import get_redis
 from app.services.room_service import RoomService
+from app.utils.redis_keys import RedisKeys
 
 logger = structlog.get_logger()
 
@@ -336,7 +337,15 @@ class GameSyncRuntime:
 
     async def get_active_game(self, *, user_id: int) -> str | None:
         redis = get_redis()
-        return await redis.get(self._active_game_key(user_id))
+        active_game_id = await redis.get(self._active_game_key(user_id))
+        if active_game_id is not None:
+            return str(active_game_id)
+
+        legacy_game_id = await redis.get(self._legacy_user_game_key(user_id))
+        if legacy_game_id is not None:
+            return str(legacy_game_id)
+
+        return None
 
     async def clear_active_game(self, *, user_id: int) -> None:
         redis = get_redis()
@@ -382,6 +391,7 @@ class GameSyncRuntime:
             return
 
         await self._cleanup_expired_disconnects()
+        await self._reconcile_playing_rooms_on_startup()
         self._scheduler_task = asyncio.create_task(self._scheduler_loop())
         self._worker_tasks = [
             asyncio.create_task(self._worker_loop())
@@ -569,6 +579,74 @@ class GameSyncRuntime:
                 max=cutoff,
             )
 
+    async def _reconcile_playing_rooms_on_startup(self) -> None:
+        redis = get_redis()
+        room_service = RoomService()
+        room_ids = sorted(await redis.smembers(RedisKeys.rooms_index()))
+
+        for room_id in room_ids:
+            room = await room_service.get_room(room_id)
+            if room is None:
+                await redis.srem(RedisKeys.rooms_index(), room_id)
+                continue
+
+            if room.get("status") != "playing":
+                continue
+
+            game_id = room.get("game_id")
+            state = await get_game_state(str(game_id)) if game_id else None
+            if state is None or state.status != "playing":
+                await self._cleanup_stale_room_on_startup(room=room)
+                continue
+
+            for player in state.players.values():
+                if player.player_state == PlayerState.BANKRUPT:
+                    continue
+                if player.player_id in self._user_sids:
+                    continue
+                if (
+                    await self.get_disconnected_at(
+                        game_id=state.game_id,
+                        player_id=player.player_id,
+                    )
+                    is not None
+                ):
+                    continue
+                await self.set_disconnected_at(
+                    game_id=state.game_id,
+                    player_id=player.player_id,
+                )
+
+    async def _cleanup_stale_room_on_startup(self, *, room: dict) -> None:
+        room_service = RoomService()
+        redis = get_redis()
+        room_id = str(room["id"])
+        game_id = room.get("game_id")
+        player_ids = [int(player["id"]) for player in room.get("players", [])]
+
+        await room_service.cleanup_abandoned_room(
+            room_id=room_id,
+            player_ids=player_ids,
+        )
+
+        if game_id:
+            await delete_game_state(str(game_id))
+            await redis.delete(self._patchlog_key(str(game_id)))
+            for player_id in player_ids:
+                await self.clear_disconnected_at(
+                    game_id=str(game_id),
+                    player_id=player_id,
+                )
+
+        for player_id in player_ids:
+            await self.clear_active_game(user_id=player_id)
+            await redis.delete(self._legacy_user_game_key(player_id))
+
+        await self._sio.emit(
+            "lobby_updated",
+            {"action": "removed", "room": {"id": room_id}},
+        )
+
     async def _try_claim_timer(self, *, game_id: str, player_id: int) -> bool:
         redis = get_redis()
         claimed = await redis.set(
@@ -683,6 +761,13 @@ class GameSyncRuntime:
                 )
 
                 await self.clear_disconnected_at(game_id=game_id, player_id=player_id)
+                await self._remove_player_from_room(
+                    room_id=state.room_id,
+                    player_id=player_id,
+                )
+                await self.clear_active_game(user_id=player_id)
+                redis = get_redis()
+                await redis.delete(self._legacy_user_game_key(player_id))
                 await self._sio.emit("game:patch", packet, room=f"game:{game_id}")
                 if state.status == "finished":
                     await self.finalize_finished_game(state)
@@ -823,6 +908,51 @@ class GameSyncRuntime:
 
     def _active_players(self, state: GameState) -> list[PlayerGameState]:
         return state.active_players()
+
+    async def _remove_player_from_room(self, *, room_id: str, player_id: int) -> None:
+        room_service = RoomService()
+        room = await room_service.get_room(room_id)
+        if room is None:
+            return
+
+        if not any(player["id"] == str(player_id) for player in room["players"]):
+            return
+
+        room, new_host_id = await room_service.leave_room(
+            room_id=room_id,
+            user_id=player_id,
+        )
+
+        if room is None:
+            await self._sio.emit(
+                "lobby_updated",
+                {"action": "removed", "room": {"id": room_id}},
+            )
+            return
+
+        await self._sio.emit(
+            "lobby_updated",
+            {"action": "updated", "room": room_service.room_card(room)},
+        )
+        await self._sio.emit(
+            "room_updated",
+            room_service.room_snapshot(room),
+            room=f"room:{room_id}",
+        )
+        if new_host_id:
+            new_host = next(
+                (player for player in room["players"] if player["id"] == new_host_id),
+                None,
+            )
+            if new_host is not None:
+                await self._sio.emit(
+                    "host_changed",
+                    {
+                        "new_host_id": new_host_id,
+                        "new_host_nickname": new_host["nickname"],
+                    },
+                    room=f"room:{room_id}",
+                )
 
     async def finalize_finished_game(self, state: GameState) -> dict | None:
         room_service = RoomService()
