@@ -611,14 +611,22 @@ def test_last_player_standing_triggers_game_over():
     ]
     assert len(game_over_events) == 1
     assert game_over_events[0]["reason"] == "last_player_standing"
+    assert game_over_events[0]["winner"]["assets"] == INITIAL_BALANCE
     assert state.status == "finished"
 
 
-def test_max_rounds_triggers_game_over_exactly_once():
+def test_max_rounds_uses_total_assets_for_winner():
     state = make_state()
+    tile = TILE_MAP[4]
     state.round = MAX_ROUNDS
     state.current_player_id = 2
     state.phase = "RESOLVING"
+    state.require_player(1).balance = 300000
+    state.tile(4).owner_id = 1
+    state.tile(4).building_level = 2
+    state.require_player(1).owned_tiles = [4]
+    state.require_player(1).building_levels = {4: 2}
+    state.require_player(2).balance = 450000
 
     events, patches = process_end_turn(state, 2)
     apply_patches(state, patches)
@@ -628,6 +636,9 @@ def test_max_rounds_triggers_game_over_exactly_once():
     ]
     assert len(game_over_events) == 1
     assert game_over_events[0]["reason"] == "max_rounds"
+    assert game_over_events[0]["winner"]["playerId"] == 1
+    assert game_over_events[0]["winner"]["assets"] == 300000 + tile.price + tile.build_costs[1] + tile.build_costs[2]
+    assert state.winner_id == 1
     assert state.status == "finished"
 
 

@@ -16,6 +16,7 @@ PHASE_WAIT_PROMPT = "WAIT_PROMPT"
 PHASE_GAME_OVER = "GAME_OVER"
 
 MAX_BUILDING_LEVEL = 3
+MONEY_SCALE = 100
 BUILDING_STAGE_LABELS = {
     1: "주택",
     2: "호텔",
@@ -78,6 +79,20 @@ EVENT_CARD_POOL: list[dict] = [
     {"type": "LOSE_MONEY", "amount": 10000, "description": "벌금 1억원을 냅니다."},
 ]
 
+def get_object_particle(word: str) -> str:
+	if not word:
+		return "를"
+
+	last_char = word[-1]
+	code = ord(last_char)
+
+	# 한글 음절 범위: 가 ~ 힣
+	if 0xAC00 <= code <= 0xD7A3:
+		has_batchim = (code - 0xAC00) % 28 != 0
+		return "을" if has_batchim else "를"
+
+	# 한글이 아니면 보통 받침 없음으로 처리
+	return "를"
 
 def serialize_prompt(prompt: PendingPrompt | None) -> dict | None:
     if prompt is None:
@@ -125,6 +140,58 @@ def _format_money(amount: int) -> str:
 
 def _get_build_stage_name(level: int) -> str:
     return BUILDING_STAGE_LABELS.get(level, "건설")
+
+
+def _format_money(amount: int) -> str:
+    if amount % MONEY_SCALE == 0:
+        return f"{amount // MONEY_SCALE}만원"
+    return f"{amount / MONEY_SCALE:.2f}만원"
+
+
+def _get_build_stage_name(level: int) -> str:
+    return BUILDING_STAGE_LABELS.get(level, "건설")
+
+
+def get_player_total_assets(state: GameState, player_id: int) -> int:
+    player = state.require_player(player_id)
+    total_assets = player.balance
+
+    for tile_id in player.owned_tiles:
+        tile_state = state.tile(tile_id)
+        if tile_state is None or tile_state.owner_id != player_id:
+            continue
+        total_assets += _get_acquisition_cost(tile_id, tile_state.building_level)
+
+    return total_assets
+
+
+def build_winner_payload(state: GameState, player_id: int) -> dict[str, int | str]:
+    player = state.require_player(player_id)
+    return {
+        "playerId": player.player_id,
+        "nickname": player.nickname,
+        "balance": player.balance,
+        "assets": get_player_total_assets(state, player_id),
+    }
+
+
+def find_winner_by_assets(
+    state: GameState,
+    players: list | None = None,
+) -> dict[str, int | str] | None:
+    candidates = players if players is not None else list(state.players.values())
+    if not candidates:
+        return None
+
+    winner = max(
+        candidates,
+        key=lambda player: (
+            get_player_total_assets(state, player.player_id),
+            player.balance,
+            -player.turn_order,
+        ),
+    )
+    return build_winner_payload(state, winner.player_id)
 
 
 def _player_name(state: GameState, player_id: int) -> str:
@@ -205,13 +272,7 @@ def _append_game_over_if_last_survivor(
 
     winner = active_players[0] if active_players else None
     winner_payload = (
-        None
-        if winner is None
-        else {
-            "playerId": winner.player_id,
-            "nickname": winner.nickname,
-            "balance": winner.balance,
-        }
+        None if winner is None else build_winner_payload(preview_state, winner.player_id)
     )
 
     patches.extend(
@@ -810,8 +871,8 @@ def resolve_landing(
                 player_id=player_id,
                 title=f"{tile_def.name} 구매",
                 message=(
-                    f"{tile_def.name}을(를) "
-                    f"{_format_money(tile_def.price)}원에 구매하시겠습니까?"
+                    f"{tile_def.name}에 도착했습니다."
+                    f"{tile_def.name}{get_object_particle(tile_def.name)} {_format_money(tile_def.price)}에 구매하시겠습니까?"
                 ),
                 choices=[
                     PromptChoice(id="buy", label="구매", value="BUY"),
@@ -824,7 +885,7 @@ def resolve_landing(
                     "buildingLevel": building_level,
                 },
                 default_choice_value="SKIP",
-            )
+        )
             patches.extend(
                 [
                     op_set("pending_prompt", prompt),
@@ -842,8 +903,8 @@ def resolve_landing(
                 player_id=player_id,
                 title=f"{tile_def.name} {next_stage_name} 건설",
                 message=(
-                    f"{tile_def.name}에 {next_stage_name}을(를) "
-                    f"{_format_money(build_cost)}원에 건설하시겠습니까?"
+                    f"{tile_def.name}에 {next_stage_name}{get_object_particle(next_stage_name)} "
+                    f"{_format_money(build_cost)}에 건설하시겠습니까?"
                 ),
                 choices=[
                     PromptChoice(id="build", label="건설", value="BUILD"),
@@ -876,7 +937,7 @@ def resolve_landing(
                 title=f"{tile_def.name} 통행료",
                 message=(
                     f"{_player_name(state, owner_id)}님의 {tile_def.name}입니다. "
-                    f"먼저 통행료 {_format_money(toll)}원을 지불한 뒤 인수 여부를 결정합니다."
+                    f"먼저 통행료 {_format_money(toll)}을 지불한 뒤 인수 여부를 결정합니다."
                 ),
                 choices=[PromptChoice(id="pay", label="확인", value="PAY_TOLL")],
                 payload={
@@ -1082,7 +1143,7 @@ def process_prompt_response(
                 title=f"{prompt.payload.get('tileName', '도시')} 인수",
                 message=(
                     f"{prompt.payload.get('ownerName', '상대')}님의 땅을 "
-                    f"{_format_money(int(prompt.payload.get('acquisitionCost', 0)))}원에 "
+                    f"{_format_money(int(prompt.payload.get('acquisitionCost', 0)))}에 "
                     "인수하시겠습니까?"
                 ),
                 choices=[

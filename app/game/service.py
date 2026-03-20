@@ -6,6 +6,7 @@ from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
+from app.game.board import TILE_MAP
 from app.game.enums import (
     GameOverReason,
     MoveTrigger,
@@ -47,6 +48,26 @@ class LastSurvivorVictoryCondition:
         }
 
 
+def _legacy_player_total_assets(*, state: dict[str, Any], player: dict[str, Any]) -> int:
+    player_id = int(player["userId"])
+    total_assets = int(player.get("balance", 0))
+
+    for tile in state.get("tiles", []):
+        owner_user_id = tile.get("ownerUserId")
+        if owner_user_id is None or int(owner_user_id) != player_id:
+            continue
+
+        tile_id = int(tile.get("tileId", -1))
+        tile_def = TILE_MAP.get(tile_id)
+        if tile_def is None:
+            continue
+
+        building_level = int(tile.get("buildingLevel", 0))
+        total_assets += tile_def.price + sum(tile_def.build_costs[1 : building_level + 1])
+
+    return total_assets
+
+
 class MaxRoundVictoryCondition:
     def evaluate(
         self,
@@ -63,7 +84,13 @@ class MaxRoundVictoryCondition:
 
         winner_user_id = None
         if alive_players:
-            winner = max(alive_players, key=lambda player: int(player["balance"]))
+            winner = max(
+                alive_players,
+                key=lambda player: (
+                    _legacy_player_total_assets(state=state, player=player),
+                    int(player["balance"]),
+                ),
+            )
             winner_user_id = winner["userId"]
 
         state["status"] = "FINISHED"

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from app.game.enums import PlayerState
-from app.game.models import GameState, PlayerGameState
+from app.game.models import GameState, PlayerGameState, TileGameState
 from app.game.state import INITIAL_BALANCE
 from app.game.sync_runtime import GameSyncRuntime
 
@@ -50,6 +50,21 @@ def make_state() -> GameState:
         },
         tiles={},
     )
+
+
+def test_winner_payload_includes_total_assets():
+    sio = AsyncMock()
+    runtime = GameSyncRuntime(sio)
+    state = make_state()
+    state.tiles = {4: TileGameState(owner_id=1, building_level=1)}
+    state.players[1].owned_tiles = [4]
+    state.players[1].building_levels = {4: 1}
+
+    winner = runtime._winner_payload(state, state.players[1])
+
+    assert winner["playerId"] == 1
+    assert winner["balance"] == INITIAL_BALANCE + 30000
+    assert winner["assets"] == INITIAL_BALANCE + 30000 + 30000 + 40000
 
 
 @pytest.mark.asyncio

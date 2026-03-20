@@ -9,6 +9,7 @@ from app.game.rules import (
     PHASE_RESOLVING,
     PHASE_WAIT_PROMPT,
     PHASE_WAIT_ROLL,
+    find_winner_by_assets,
 )
 
 MAX_ROUNDS = 20
@@ -27,12 +28,10 @@ def get_next_player_id(state: GameState, current_player_id: int) -> int:
 
 
 def _find_winner(state: GameState) -> dict:
-    winner = max(state.players.values(), key=lambda player: player.balance)
-    return {
-        "playerId": winner.player_id,
-        "nickname": winner.nickname,
-        "balance": winner.balance,
-    }
+    winner = find_winner_by_assets(state)
+    if winner is None:
+        raise GameActionError(code="INVALID_PHASE", message="승자를 계산할 수 없습니다.")
+    return winner
 
 
 def process_end_turn(

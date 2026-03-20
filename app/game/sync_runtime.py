@@ -15,7 +15,7 @@ from app.game.enums import PlayerState, ServerEventType
 from app.game.models import GameState, PlayerGameState
 from app.game.patch import op_set
 from app.game.presentation import serialize_game_patch
-from app.game.rules import PHASE_GAME_OVER, PHASE_WAIT_ROLL
+from app.game.rules import PHASE_GAME_OVER, PHASE_WAIT_ROLL, build_winner_payload
 from app.game.state import delete_game_state, game_lock, get_game_state, save_game_state
 from app.game.timer import cancel_turn_timer
 from app.presence import update_status
@@ -641,7 +641,7 @@ class GameSyncRuntime:
                 alive_players = self._active_players(state)
                 if len(alive_players) <= 1:
                     winner = (
-                        self._winner_payload(alive_players[0])
+                        self._winner_payload(state, alive_players[0])
                         if alive_players
                         else None
                     )
@@ -814,12 +814,12 @@ class GameSyncRuntime:
             }
         )
 
-    def _winner_payload(self, player: PlayerGameState) -> dict[str, Any]:
-        return {
-            "playerId": player.player_id,
-            "nickname": player.nickname,
-            "balance": player.balance,
-        }
+    def _winner_payload(
+        self,
+        state: GameState,
+        player: PlayerGameState,
+    ) -> dict[str, Any]:
+        return build_winner_payload(state, player.player_id)
 
     def _active_players(self, state: GameState) -> list[PlayerGameState]:
         return state.active_players()
