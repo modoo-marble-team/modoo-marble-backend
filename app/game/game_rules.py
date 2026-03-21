@@ -1,3 +1,8 @@
+"""룰셋 JSON에서 읽은 값을 코드용 상수로 꺼내 두는 모듈.
+
+게임 로직은 이 값을 통해 현재 룰셋을 참조한다.
+"""
+
 from __future__ import annotations
 
 from app.game.infrastructure.ruleset_loader import load_ruleset

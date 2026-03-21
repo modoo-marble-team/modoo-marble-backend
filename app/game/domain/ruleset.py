@@ -1,3 +1,8 @@
+"""룰셋 JSON을 타입 있는 객체로 바꾸는 모듈.
+
+게임 로직은 raw JSON 대신 이 타입들을 기준으로 규칙을 읽는다.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -30,6 +35,7 @@ class CardDefinition:
 
 @dataclass(frozen=True, slots=True)
 class PropertyTierDefinition:
+    # 같은 tier에 속한 땅들이 공통으로 쓰는 경제 설정.
     tier: int
     price: int
     tolls: tuple[int, ...]
@@ -55,6 +61,7 @@ class PropertyTierDefinition:
 
 @dataclass(frozen=True, slots=True)
 class SellRefundDefinition:
+    # 매각 시 환급률 설정.
     purchase_price_ratio: float
     build_cost_ratio: float
 
@@ -68,6 +75,7 @@ class SellRefundDefinition:
 
 @dataclass(frozen=True, slots=True)
 class AcquisitionDefinition:
+    # 인수 시 자산가치에 곱할 배율 설정.
     multiplier: float
 
     @classmethod
@@ -77,6 +85,8 @@ class AcquisitionDefinition:
 
 @dataclass(frozen=True, slots=True)
 class TileDefinition:
+    # 보드판 타일의 '정적 정의'.
+    # 소유자나 건물 단계처럼 바뀌는 값은 여기 두지 않는다.
     tile_id: int
     name: str
     tile_type: TileType
@@ -100,6 +110,7 @@ class TileDefinition:
 
 @dataclass(frozen=True, slots=True)
 class RuleSet:
+    # 게임 한 판이 따르는 규칙 묶음.
     version: str
     initial_balance: int
     start_salary: int
@@ -161,6 +172,7 @@ class RuleSet:
         tile_data: dict[str, Any],
         property_tiers: dict[int, PropertyTierDefinition],
     ) -> TileDefinition:
+        # PROPERTY 타일은 tier 설정을 읽어 완전한 TileDefinition으로 만든다.
         tile = TileDefinition.from_dict(tile_data)
         if tile.tile_type != TileType.PROPERTY:
             return tile

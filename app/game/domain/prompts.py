@@ -1,3 +1,8 @@
+"""프롬프트 응답 규칙을 모아 둔 모듈.
+
+사용자가 버튼을 누른 뒤 어떤 액션을 실행할지 여기서 결정한다.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -15,6 +20,7 @@ ActionResult: TypeAlias = tuple[list[dict], list[dict]]
 
 @dataclass(frozen=True, slots=True)
 class PromptContext:
+    # 프롬프트 규칙이 바깥 기능을 호출할 때 쓰는 함수 묶음.
     board_size: int
     phase_wait_prompt: str
     make_prompt: Callable[..., PendingPrompt]
@@ -33,6 +39,7 @@ class PromptContext:
 
 @dataclass(frozen=True, slots=True)
 class BasePromptHandler:
+    # 모든 프롬프트 핸들러의 공통 인터페이스.
     prompt_type: str
 
     def handle(
@@ -251,5 +258,6 @@ PROMPT_HANDLER_TYPES: dict[str, type[BasePromptHandler]] = {
 
 @lru_cache(maxsize=32)
 def build_prompt_handler(prompt_type: str) -> BasePromptHandler:
+    # 프롬프트 타입 문자열을 실제 핸들러 객체로 바꾼다.
     handler_type = PROMPT_HANDLER_TYPES.get(prompt_type, BasePromptHandler)
     return handler_type(prompt_type)

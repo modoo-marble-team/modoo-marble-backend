@@ -1,3 +1,5 @@
+"""카드 한 장이 실행될 때의 효과를 모아 둔 모듈."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -13,6 +15,7 @@ ActionResult: TypeAlias = tuple[list[dict], list[dict]]
 
 @dataclass(frozen=True, slots=True)
 class CardEffectContext:
+    # 카드 효과가 외부 기능을 호출할 때 쓰는 함수 묶음.
     board_size: int
     start_salary: int
     apply_money_delta: Callable[[GameState, int, int], tuple[list[dict], list[dict]]]
@@ -21,6 +24,7 @@ class CardEffectContext:
 
 @dataclass(frozen=True, slots=True)
 class BaseCardEffect:
+    # 모든 카드 효과의 공통 인터페이스.
     effect_type: str
 
     def apply(
@@ -74,6 +78,7 @@ class MoveForwardCardEffect(BaseCardEffect):
         card: dict,
         context: CardEffectContext,
     ) -> ActionResult:
+        # 앞으로 이동하다가 출발 칸을 넘으면 월급도 같이 지급한다.
         amount = int(card.get("amount", 0))
         player = state.require_player(player_id)
         from_tile = player.current_tile_id
@@ -106,6 +111,7 @@ class MoveBackwardCardEffect(BaseCardEffect):
         card: dict,
         context: CardEffectContext,
     ) -> ActionResult:
+        # 뒤로 이동은 월급 없이 위치만 바꾼다.
         amount = int(card.get("amount", 0))
         player = state.require_player(player_id)
         from_tile = player.current_tile_id
@@ -132,6 +138,7 @@ class StealPropertyCardEffect(BaseCardEffect):
         card: dict,
         context: CardEffectContext,
     ) -> ActionResult:
+        # 다른 플레이어의 땅 하나를 무작위로 가져온다.
         del context, card
         other_players = [
             (candidate_id, candidate)
@@ -177,6 +184,7 @@ class GivePropertyCardEffect(BaseCardEffect):
         card: dict,
         context: CardEffectContext,
     ) -> ActionResult:
+        # 내 땅 하나를 다른 플레이어에게 넘긴다.
         del context, card
         player = state.require_player(player_id)
         if not player.owned_tiles:
@@ -226,5 +234,6 @@ CARD_EFFECT_TYPES: dict[str, type[BaseCardEffect]] = {
 
 @lru_cache(maxsize=32)
 def build_card_effect(effect_type: str) -> BaseCardEffect:
+    # 카드 타입 문자열을 실제 효과 객체로 바꾼다.
     effect_class = CARD_EFFECT_TYPES.get(effect_type, BaseCardEffect)
     return effect_class(effect_type)

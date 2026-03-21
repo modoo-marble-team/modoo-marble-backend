@@ -1,3 +1,8 @@
+"""게임 액션 실행 흐름을 감싸는 애플리케이션 계층.
+
+잠금, 상태 로드/저장, 규칙 실행 순서를 여기서 관리한다.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -24,6 +29,7 @@ class GameDesyncError(RuntimeError):
 
 @dataclass(slots=True)
 class GameCommandResult:
+    # 액션 실행 뒤 소켓 계층에 넘길 결과 묶음.
     state: GameState
     events: list[dict]
     patches: list[dict]
@@ -93,6 +99,8 @@ class GameActionService:
         known_revision: int | None,
         mutate: Callable[[GameState], tuple[list[dict], list[dict]]],
     ) -> GameCommandResult:
+        # 모든 액션은
+        # 잠금 획득 -> 상태 로드 -> 규칙 실행 -> 패치 적용 -> 저장 순서로 처리한다.
         async with self._repository.lock(game_id):
             state = await self._repository.load(game_id)
             if state is None:

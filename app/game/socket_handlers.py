@@ -1,3 +1,9 @@
+"""소켓 이벤트를 받아 게임 서비스와 연결하는 모듈.
+
+핵심 규칙 계산은 다른 계층에 맡기고,
+여기서는 입출력 흐름을 조립하는 역할만 한다.
+"""
+
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
@@ -34,11 +40,13 @@ def register_game_handlers(
     sio: socketio.AsyncServer,
     sid_to_user: dict[str, int],
 ) -> None:
+    # 소켓 서버에 게임 관련 이벤트 핸들러를 등록한다.
     room_service = RoomService()
     presenter = GameSocketPresenter()
     sync_runtime = init_game_sync_runtime(sio)
 
     class SocketHandlerRepository(GameStateRepository):
+        # 기존 저장 함수를 현재 서비스 인터페이스에 맞춰 연결하는 어댑터.
         async def load(self, game_id: str) -> GameState | None:
             return await get_game_state(game_id)
 
@@ -67,6 +75,7 @@ def register_game_handlers(
         )
 
     async def emit_prompt_if_needed(state: GameState) -> None:
+        # 현재 상태에 프롬프트가 있으면 대상 유저에게만 전송한다.
         sync_prompt_timer(game_id=state.game_id, prompt=state.pending_prompt)
         prompt_payload = presenter.serialize_prompt(state.pending_prompt)
         if not prompt_payload or state.pending_prompt is None:
@@ -84,6 +93,7 @@ def register_game_handlers(
         state: GameState,
         user_id: int,
     ) -> bool:
+        # 요청한 유저가 해당 게임 방 참가자인지 확인한다.
         if user_id not in state.players:
             await emit_game_error(
                 sid=sid,

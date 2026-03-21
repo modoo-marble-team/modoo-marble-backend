@@ -1,3 +1,8 @@
+"""타일 착지 규칙을 모아 둔 모듈.
+
+각 타일 클래스는 '이 칸에 도착했을 때 무슨 일이 일어나는지'만 담당한다.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -15,6 +20,7 @@ ActionResult: TypeAlias = tuple[list[dict], list[dict]]
 
 @dataclass(frozen=True, slots=True)
 class LandingContext:
+    # 타일 규칙이 바깥 기능을 호출할 때 쓰는 함수 묶음.
     phase_wait_prompt: str
     phase_resolving: str
     phase_game_over: str
@@ -40,6 +46,7 @@ class LandingContext:
 
 @dataclass(frozen=True, slots=True)
 class BaseTile:
+    # 모든 타일 핸들러의 공통 인터페이스.
     definition: TileDefinition
 
     def on_land(
@@ -67,6 +74,8 @@ class PropertyTile(BaseTile):
         patches: list[dict],
         context: LandingContext,
     ) -> None:
+        # 땅 타일은 소유 상태에 따라
+        # 구매 / 건설 / 통행료 프롬프트 중 하나를 연다.
         if tile_state is None:
             return
 
@@ -364,5 +373,6 @@ TILE_HANDLER_TYPES: dict[TileType, type[BaseTile]] = {
 
 @lru_cache(maxsize=128)
 def build_tile_handler(definition: TileDefinition) -> BaseTile:
+    # 타일 타입 문자열을 실제 핸들러 객체로 바꾼다.
     handler_type = TILE_HANDLER_TYPES.get(definition.tile_type, BaseTile)
     return handler_type(definition)

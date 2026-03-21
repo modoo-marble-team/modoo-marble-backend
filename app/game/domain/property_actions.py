@@ -1,3 +1,9 @@
+"""땅과 관련된 즉시 액션 규칙을 모아 둔 모듈.
+
+구매, 건설, 통행료, 인수, 매각처럼
+'누가 얼마를 내고 소유권이 어떻게 바뀌는지'를 계산한다.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -13,6 +19,7 @@ ActionResult: TypeAlias = tuple[list[dict], list[dict]]
 
 @dataclass(frozen=True, slots=True)
 class PropertyActionContext:
+    # 땅 액션 계산에 필요한 공통 함수 묶음.
     max_building_level: int
     get_sell_refund: Callable[[int, int], int]
     get_acquisition_cost: Callable[[int, int], int]
@@ -30,6 +37,7 @@ def apply_property_acquisition(
     tile_id: int,
     context: PropertyActionContext,
 ) -> ActionResult:
+    # 다른 플레이어 땅을 인수한다.
     tile_def = state.tile(tile_id)
     board_tile = None
     try:
@@ -80,6 +88,7 @@ def apply_purchase(
     tile_id: int,
     context: PropertyActionContext,
 ) -> ActionResult:
+    # 빈 땅을 처음 구매한다.
     tile_state = state.tile(tile_id)
     from app.game.board import TILE_MAP
 
@@ -118,6 +127,7 @@ def apply_build(
     tile_id: int,
     context: PropertyActionContext,
 ) -> ActionResult:
+    # 이미 가진 땅에 건물을 한 단계 올린다.
     tile_state = state.tile(tile_id)
     from app.game.board import TILE_MAP
 
@@ -160,6 +170,7 @@ def apply_toll_payment(
     tile_id: int,
     context: PropertyActionContext,
 ) -> ActionResult:
+    # 남의 땅에 도착했을 때 통행료를 낸다.
     tile_state = state.tile(tile_id)
     from app.game.board import TILE_MAP
 
@@ -205,6 +216,7 @@ def apply_sell_property(
     building_level: int | None,
     context: PropertyActionContext,
 ) -> ActionResult:
+    # 땅을 팔고 소유권과 건물 상태를 정리한다.
     tile_state = state.tile(tile_id)
     from app.game.board import TILE_MAP
 

@@ -2,7 +2,7 @@ from tortoise import fields, models
 
 
 class Game(models.Model):
-    id = fields.IntField(pk=True)
+    id = fields.IntField(primary_key=True)
 
     winner = fields.ForeignKeyField(
         "models.User", related_name="won_games", null=True, on_delete=fields.SET_NULL

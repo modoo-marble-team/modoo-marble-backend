@@ -1,3 +1,9 @@
+"""게임 규칙의 진입점을 모아 둔 모듈.
+
+이 파일은 어떤 규칙을 호출할지 고르는 역할을 하고,
+세부 계산은 domain 하위 모듈에 위임한다.
+"""
+
 from __future__ import annotations
 
 import random
@@ -121,6 +127,8 @@ def _get_build_stage_name(level: int) -> str:
 
 
 def get_player_total_assets(state: GameState, player_id: int) -> int:
+    # 승자 판정용 총자산 계산.
+    # 현금 + 현재 소유 중인 땅의 자산가치를 더한다.
     player = state.require_player(player_id)
     total_assets = player.balance
 
@@ -177,6 +185,7 @@ def _make_prompt(
     payload: dict,
     default_choice_value: str,
 ) -> PendingPrompt:
+    # 화면에 보일 문구와 선택지, 숨은 payload를 한 번에 묶는다.
     return PendingPrompt(
         prompt_id=f"prompt-{uuid4().hex[:10]}",
         type=prompt_type,
@@ -268,6 +277,7 @@ def _apply_money_delta(
     player_id: int,
     amount: int,
 ) -> tuple[list[dict], list[dict]]:
+    # 돈이 늘거나 줄었을 때 잔액 변경과 파산 여부 확인을 같이 처리한다.
     player = state.require_player(player_id)
     next_balance = player.balance + amount
     if next_balance > 0:
@@ -408,6 +418,7 @@ def _queue_follow_up_landing_resolution(
 
 
 def _build_landing_context() -> LandingContext:
+    # 타일 객체가 필요한 외부 함수들을 한 묶음으로 전달한다.
     def append_landed_event(
         events: list[dict],
         player_id: int,
@@ -687,6 +698,7 @@ def resolve_landing(
     player_id: int,
     tile_id: int,
 ) -> tuple[list[dict], list[dict]]:
+    # 플레이어가 특정 칸에 도착했을 때의 규칙 진입점.
     tile_def = TILE_MAP[tile_id]
     tile_state = state.tile(tile_id)
     events: list[dict] = []
@@ -714,6 +726,7 @@ def process_prompt_response(
     choice: str,
     payload: dict | None = None,
 ) -> tuple[list[dict], list[dict]]:
+    # 사용자가 프롬프트에서 버튼을 눌렀을 때의 규칙 진입점.
     prompt = state.pending_prompt
     if prompt is None or prompt.prompt_id != prompt_id:
         raise GameActionError(
