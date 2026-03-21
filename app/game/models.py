@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Any, TypeVar, get_args, get_origin, get_type_hints
 
 from app.game.enums import PlayerState
+from app.game.game_rules import GAME_RULESET_VERSION
 
 T = TypeVar("T", bound="JsonModel")
 
@@ -177,6 +178,7 @@ class GameState(JsonModel):
     players: dict[int, PlayerGameState]
     tiles: dict[int, TileGameState]
     pending_prompt: PendingPrompt | None
+    ruleset_version: str = GAME_RULESET_VERSION
     winner_id: int | None = None
 
     def player(self, player_id: int) -> PlayerGameState | None:

@@ -148,6 +148,7 @@ def serialize_game_snapshot(state: GameState) -> dict[str, Any]:
     return {
         "roomId": state.room_id,
         "gameId": state.game_id,
+        "rulesetVersion": state.ruleset_version,
         "revision": state.revision,
         "phase": state.phase if state.status == "playing" else PHASE_GAME_OVER,
         "players": players,

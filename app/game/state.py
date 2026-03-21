@@ -1,3 +1,8 @@
+"""게임 상태를 만들고, 저장하고, 복원하는 모듈.
+
+여기서는 규칙 계산보다 '상태를 어떻게 보관할지'에 집중한다.
+"""
+
 from __future__ import annotations
 
 import json
@@ -6,14 +11,14 @@ from contextlib import asynccontextmanager
 from dataclasses import is_dataclass
 from typing import Any
 
-from app.game.board import BOARD, TileType
-from app.game.enums import PlayerState
+from app.game.board import BOARD
+from app.game.enums import PlayerState, TileType
+from app.game.game_rules import INITIAL_BALANCE
 from app.game.models import GameState, PlayerGameState, TileGameState
 from app.redis_client import get_redis
 
 GAME_STATE_TTL = 86400
 GAME_LOCK_TIMEOUT = 5
-INITIAL_BALANCE = 500000
 
 
 def _game_key(game_id: str) -> str:
@@ -26,6 +31,7 @@ class LockAcquisitionError(Exception):
 
 @asynccontextmanager
 async def game_lock(game_id: str):
+    # 같은 게임 상태를 동시에 두 요청이 수정하지 않도록 잠금을 건다.
     redis = get_redis()
     lock = redis.lock(
         f"game:{game_id}:lock",
@@ -47,6 +53,7 @@ def _make_initial_players(
     player_ids: list[int],
     nicknames: dict[int, str],
 ) -> dict[int, PlayerGameState]:
+    # 새 게임 시작 시 플레이어 기본 상태를 만든다.
     players: dict[int, PlayerGameState] = {}
     for order, uid in enumerate(player_ids):
         players[uid] = PlayerGameState(
@@ -65,6 +72,7 @@ def _make_initial_players(
 
 
 def _make_initial_tiles() -> dict[int, TileGameState]:
+    # 소유권이 생길 수 있는 PROPERTY 타일만 상태 테이블에 넣는다.
     tiles: dict[int, TileGameState] = {}
     for tile in BOARD:
         if tile.tile_type == TileType.PROPERTY:
@@ -81,6 +89,7 @@ async def init_game_state(
     player_ids: list[int],
     nicknames: dict[int, str],
 ) -> GameState:
+    # 게임 시작 시점의 GameState를 만들고 바로 저장한다.
     state = GameState(
         game_id=game_id,
         room_id=room_id,
@@ -101,6 +110,7 @@ async def init_game_state(
 
 
 async def get_game_state(game_id: str) -> GameState | None:
+    # Redis에 저장된 문자열을 읽어서 GameState로 복원한다.
     redis = get_redis()
     raw = await redis.get(_game_key(game_id))
     if raw is None:
@@ -109,6 +119,7 @@ async def get_game_state(game_id: str) -> GameState | None:
 
 
 async def save_game_state(game_id: str, state: GameState) -> None:
+    # 현재 GameState를 Redis에 저장한다.
     redis = get_redis()
     await redis.set(_game_key(game_id), json.dumps(state.to_json()), ex=GAME_STATE_TTL)
 
@@ -172,6 +183,7 @@ def _set_child(target: Any, key: str, value: Any) -> None:
 
 
 def apply_patches(state: GameState, patches: list[dict]) -> None:
+    # 서버에서 만든 patch 목록을 실제 상태 객체에 적용한다.
     for patch in patches:
         op = patch["op"]
         path = patch["path"]
