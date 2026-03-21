@@ -128,7 +128,8 @@ async def disconnect(sid: str):
             _sid_to_user.pop(sid, None)
 
             has_other_socket = any(
-                mapped_user_id == int(user_id) for mapped_user_id in _sid_to_user.values()
+                mapped_user_id == int(user_id)
+                for mapped_user_id in _sid_to_user.values()
             )
             if not has_other_socket:
                 _schedule_room_disconnect_cleanup(int(user_id))
