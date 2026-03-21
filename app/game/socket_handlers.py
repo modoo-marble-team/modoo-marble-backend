@@ -557,7 +557,7 @@ def register_game_handlers(
             await emit_desync_error(
                 sid=sid,
                 game_id=game_id,
-                message="????????????? ?????? ???????????",
+                message="클라이언트 상태가 서버보다 오래되었습니다.",
             )
             return
         except GameMembershipError:
