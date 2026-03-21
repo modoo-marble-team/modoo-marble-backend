@@ -65,9 +65,7 @@ def _legacy_player_total_assets(
             continue
 
         building_level = int(tile.get("buildingLevel", 0))
-        total_assets += tile_def.price + sum(
-            tile_def.build_costs[1 : building_level + 1]
-        )
+        total_assets += tile_def.price + sum(tile_def.build_costs[:building_level])
 
     return total_assets
 

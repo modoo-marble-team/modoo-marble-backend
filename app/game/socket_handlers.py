@@ -1,18 +1,22 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 import socketio
 import structlog
 
-from app.game.actions.dispatch import dispatch_game_action
-from app.game.errors import GameActionError
-from app.game.models import GameState
-from app.game.rules import (
-    process_prompt_response,
-    serialize_prompt,
+from app.game.application import (
+    GameActionService,
+    GameDesyncError,
+    GameMembershipError,
+    GameNotFoundError,
 )
+from app.game.errors import GameActionError
+from app.game.infrastructure.state_repository import GameStateRepository
+from app.game.infrastructure.socket_presenter import GameSocketPresenter
+from app.game.models import GameState
 from app.game.state import (
     LockAcquisitionError,
-    apply_patches,
     game_lock,
     get_game_state,
     save_game_state,
@@ -31,7 +35,22 @@ def register_game_handlers(
     sid_to_user: dict[str, int],
 ) -> None:
     room_service = RoomService()
+    presenter = GameSocketPresenter()
     sync_runtime = init_game_sync_runtime(sio)
+
+    class SocketHandlerRepository(GameStateRepository):
+        async def load(self, game_id: str) -> GameState | None:
+            return await get_game_state(game_id)
+
+        async def save(self, game_id: str, state: GameState) -> None:
+            await save_game_state(game_id, state)
+
+        @asynccontextmanager
+        async def lock(self, game_id: str):  # type: ignore[override]
+            async with game_lock(game_id):
+                yield
+
+    action_service = GameActionService(repository=SocketHandlerRepository())
 
     async def emit_game_error(
         *,
@@ -49,7 +68,7 @@ def register_game_handlers(
 
     async def emit_prompt_if_needed(state: GameState) -> None:
         sync_prompt_timer(game_id=state.game_id, prompt=state.pending_prompt)
-        prompt_payload = serialize_prompt(state.pending_prompt)
+        prompt_payload = presenter.serialize_prompt(state.pending_prompt)
         if not prompt_payload or state.pending_prompt is None:
             return
         await sio.emit(
@@ -325,56 +344,23 @@ def register_game_handlers(
             return
 
         try:
-            async with game_lock(game_id):
-                state = await get_game_state(game_id)
-                if state is None:
-                    await sio.emit(
-                        "game:ack",
-                        build_error_ack(
-                            game_id=game_id,
-                            action_id=action_id,
-                            action_type=action_type,
-                            code="GAME_NOT_FOUND",
-                            message="게임을 찾을 수 없습니다.",
-                            revision=-1,
-                        ),
-                        to=sid,
-                    )
-                    return
-
-                if client_revision is not None and state.revision != client_revision:
-                    await emit_desync_error(
-                        sid=sid,
-                        game_id=game_id,
-                        message="클라이언트 상태가 서버보다 오래되었습니다.",
-                    )
-                    return
-
-                if not await ensure_game_room_membership(
-                    sid=sid,
-                    game_id=str(game_id),
-                    state=state,
-                    user_id=user_id,
-                ):
-                    return
-
-                previous_turn = state.turn
-                previous_player_id = state.current_player_id
-
-                events, patches = dispatch_game_action(
-                    state,
-                    user_id=user_id,
-                    action_type=action_type,
-                    data=data,
-                )
-                apply_patches(state, patches)
-
-                state.revision += 1
-                await save_game_state(game_id, state)
-                await sync_runtime.set_active_game(
-                    user_id=user_id,
-                    game_id=str(game_id),
-                )
+            result = await action_service.execute_action(
+                game_id=str(game_id),
+                user_id=user_id,
+                action_type=action_type,
+                data=data,
+                known_revision=client_revision,
+            )
+            state = result.state
+            events = result.events
+            patches = result.patches
+            previous_turn = result.previous_turn
+            previous_player_id = result.previous_player_id
+            await sio.enter_room(sid, f"game:{game_id}")
+            await sync_runtime.set_active_game(
+                user_id=user_id,
+                game_id=str(game_id),
+            )
 
         except LockAcquisitionError:
             await sio.emit(
@@ -388,6 +374,35 @@ def register_game_handlers(
                     revision=-1,
                 ),
                 to=sid,
+            )
+            return
+        except GameNotFoundError:
+            await sio.emit(
+                "game:ack",
+                build_error_ack(
+                    game_id=game_id,
+                    action_id=action_id,
+                    action_type=action_type,
+                    code="GAME_NOT_FOUND",
+                    message="???????? ????????.",
+                    revision=-1,
+                ),
+                to=sid,
+            )
+            return
+        except GameDesyncError:
+            await emit_desync_error(
+                sid=sid,
+                game_id=game_id,
+                message="????????????? ?????? ???????????",
+            )
+            return
+        except GameMembershipError:
+            await emit_game_error(
+                sid=sid,
+                game_id=str(game_id),
+                code="NOT_GAME_MEMBER",
+                message="??? ?????? ??????.",
             )
             return
         except GameActionError as exc:
@@ -479,58 +494,24 @@ def register_game_handlers(
             return
 
         try:
-            async with game_lock(game_id):
-                state = await get_game_state(game_id)
-                if state is None:
-                    await sio.emit(
-                        "game:ack",
-                        build_error_ack(
-                            game_id=game_id,
-                            action_id=action_id,
-                            action_type=PROMPT_RESPONSE_ACK_TYPE,
-                            code="GAME_NOT_FOUND",
-                            message="게임을 찾을 수 없습니다.",
-                            revision=-1,
-                            prompt_id=prompt_id,
-                        ),
-                        to=sid,
-                    )
-                    return
-
-                if client_revision is not None and state.revision != client_revision:
-                    await emit_desync_error(
-                        sid=sid,
-                        game_id=game_id,
-                        message="클라이언트 상태가 서버보다 오래되었습니다.",
-                    )
-                    return
-
-                if not await ensure_game_room_membership(
-                    sid=sid,
-                    game_id=str(game_id),
-                    state=state,
-                    user_id=user_id,
-                ):
-                    return
-
-                previous_turn = state.turn
-                previous_player_id = state.current_player_id
-
-                events, patches = process_prompt_response(
-                    state,
-                    player_id=user_id,
-                    prompt_id=prompt_id,
-                    choice=choice,
-                    payload=payload,
-                )
-                apply_patches(state, patches)
-
-                state.revision += 1
-                await save_game_state(game_id, state)
-                await sync_runtime.set_active_game(
-                    user_id=user_id,
-                    game_id=str(game_id),
-                )
+            result = await action_service.respond_prompt(
+                game_id=str(game_id),
+                user_id=user_id,
+                prompt_id=prompt_id,
+                choice=choice,
+                payload=payload,
+                known_revision=client_revision,
+            )
+            state = result.state
+            events = result.events
+            patches = result.patches
+            previous_turn = result.previous_turn
+            previous_player_id = result.previous_player_id
+            await sio.enter_room(sid, f"game:{game_id}")
+            await sync_runtime.set_active_game(
+                user_id=user_id,
+                game_id=str(game_id),
+            )
 
         except LockAcquisitionError:
             await sio.emit(
@@ -545,6 +526,36 @@ def register_game_handlers(
                     prompt_id=prompt_id,
                 ),
                 to=sid,
+            )
+            return
+        except GameNotFoundError:
+            await sio.emit(
+                "game:ack",
+                build_error_ack(
+                    game_id=game_id,
+                    action_id=action_id,
+                    action_type=PROMPT_RESPONSE_ACK_TYPE,
+                    code="GAME_NOT_FOUND",
+                    message="???????? ????????.",
+                    revision=-1,
+                    prompt_id=prompt_id,
+                ),
+                to=sid,
+            )
+            return
+        except GameDesyncError:
+            await emit_desync_error(
+                sid=sid,
+                game_id=game_id,
+                message="????????????? ?????? ???????????",
+            )
+            return
+        except GameMembershipError:
+            await emit_game_error(
+                sid=sid,
+                game_id=str(game_id),
+                code="NOT_GAME_MEMBER",
+                message="??? ?????? ??????.",
             )
             return
         except GameActionError as exc:

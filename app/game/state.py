@@ -6,14 +6,15 @@ from contextlib import asynccontextmanager
 from dataclasses import is_dataclass
 from typing import Any
 
-from app.game.board import BOARD, TileType
+from app.game.board import BOARD
+from app.game.enums import TileType
+from app.game.game_rules import INITIAL_BALANCE
 from app.game.enums import PlayerState
 from app.game.models import GameState, PlayerGameState, TileGameState
 from app.redis_client import get_redis
 
 GAME_STATE_TTL = 86400
 GAME_LOCK_TIMEOUT = 5
-INITIAL_BALANCE = 500000
 
 
 def _game_key(game_id: str) -> str:

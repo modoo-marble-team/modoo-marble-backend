@@ -6,8 +6,7 @@ import random
 import time
 
 import socketio
-
-TURN_TIMEOUT_SECONDS = 30
+from app.game.game_rules import TURN_TIMEOUT_SECONDS
 _timers: dict[str, asyncio.Task] = {}
 _turn_deadlines_ms: dict[str, int] = {}
 _prompt_deadlines_ms: dict[str, tuple[str, int]] = {}

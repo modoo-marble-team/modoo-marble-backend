@@ -5,6 +5,8 @@ from app.game.actions.roll_dice import process_roll_dice
 from app.game.board import BOARD, TILE_MAP
 from app.game.enums import PlayerState, ServerEventType, TileType
 from app.game.errors import GameActionError
+from app.game.game_rules import ACQUISITION_PRICE_MULTIPLIER
+from app.game.game_rules import SELL_PURCHASE_PRICE_REFUND_RATIO
 from app.game.models import GameState, PlayerGameState, TileGameState
 from app.game.presentation import serialize_game_snapshot
 from app.game.rules import (
@@ -179,7 +181,7 @@ def test_property_purchase_can_chain_into_build_prompt(monkeypatch):
     build_prompt = state.pending_prompt
     assert build_prompt is not None
     assert build_prompt.type == "BUILD_OR_SKIP"
-    assert build_prompt.payload["buildCost"] == tile.build_costs[1]
+    assert build_prompt.payload["buildCost"] == tile.build_costs[0]
 
     build_events, build_patches = process_prompt_response(
         state,
@@ -198,7 +200,7 @@ def test_property_purchase_can_chain_into_build_prompt(monkeypatch):
     assert state.require_player(1).building_levels == {4: 1}
     assert (
         state.require_player(1).balance
-        == INITIAL_BALANCE - tile.price - tile.build_costs[1]
+        == INITIAL_BALANCE - tile.price - tile.build_costs[0]
     )
     assert end_events[0]["type"] == "TURN_ENDED"
     assert state.current_player_id == 2
@@ -305,9 +307,11 @@ def test_owned_property_landing_can_acquire_full_property_with_buildings(monkeyp
     acquisition_prompt = state.pending_prompt
     assert acquisition_prompt is not None
     assert acquisition_prompt.type == "ACQUISITION_OR_SKIP"
-    assert acquisition_prompt.payload["acquisitionCost"] == (
-        tile.price + tile.build_costs[1] + tile.build_costs[2]
+    expected_acquisition_cost = int(
+        (tile.price + tile.build_costs[0] + tile.build_costs[1])
+        * ACQUISITION_PRICE_MULTIPLIER
     )
+    assert acquisition_prompt.payload["acquisitionCost"] == expected_acquisition_cost
     assert acquisition_prompt.payload["buildingLevel"] == 2
     assert any(event["type"] == "PAID_TOLL" for event in toll_events)
 
@@ -325,16 +329,12 @@ def test_owned_property_landing_can_acquire_full_property_with_buildings(monkeyp
     assert state.require_player(1).balance == (
         INITIAL_BALANCE
         + tile.tolls[2]
-        + tile.price
-        + tile.build_costs[1]
-        + tile.build_costs[2]
+        + expected_acquisition_cost
     )
     assert state.require_player(2).balance == (
         INITIAL_BALANCE
         - tile.tolls[2]
-        - tile.price
-        - tile.build_costs[1]
-        - tile.build_costs[2]
+        - expected_acquisition_cost
     )
     assert state.require_player(1).owned_tiles == []
     assert state.require_player(1).building_levels == {}
@@ -496,7 +496,9 @@ def test_sell_property_action_refunds_money_and_releases_tile():
     apply_patches(state, patches)
 
     assert any(event["type"] == "SOLD_PROPERTY" for event in events)
-    assert state.require_player(1).balance == INITIAL_BALANCE + tile.price
+    assert state.require_player(1).balance == INITIAL_BALANCE + int(
+        tile.price * SELL_PURCHASE_PRICE_REFUND_RATIO
+    )
     assert state.tile(4).owner_id is None
     assert state.require_player(1).owned_tiles == []
 
@@ -626,7 +628,8 @@ def test_max_rounds_uses_total_assets_for_winner():
     state.tile(4).building_level = 2
     state.require_player(1).owned_tiles = [4]
     state.require_player(1).building_levels = {4: 2}
-    state.require_player(2).balance = 450000
+    player_one_assets = 300000 + tile.price + tile.build_costs[0] + tile.build_costs[1]
+    state.require_player(2).balance = player_one_assets - 1
 
     events, patches = process_end_turn(state, 2)
     apply_patches(state, patches)
@@ -639,7 +642,7 @@ def test_max_rounds_uses_total_assets_for_winner():
     assert game_over_events[0]["winner"]["playerId"] == 1
     assert (
         game_over_events[0]["winner"]["assets"]
-        == 300000 + tile.price + tile.build_costs[1] + tile.build_costs[2]
+        == player_one_assets
     )
     assert state.winner_id == 1
     assert state.status == "finished"
