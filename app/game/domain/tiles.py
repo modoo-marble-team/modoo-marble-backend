@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, TypeAlias
 
+from app.game.game_rules import ISLAND_LOCK_TURNS
 from app.game.domain.ruleset import TileDefinition
 from app.game.enums import PlayerState, ServerEventType, TileType
 from app.game.models import GameState, PromptChoice, TileGameState
@@ -200,7 +201,7 @@ class MoveToIslandTile(BaseTile):
             [
                 op_set(f"players.{player_id}.current_tile_id", context.island_tile_id),
                 op_set(f"players.{player_id}.player_state", PlayerState.LOCKED),
-                op_set(f"players.{player_id}.state_duration", 3),
+                op_set(f"players.{player_id}.state_duration", ISLAND_LOCK_TURNS),
                 op_set(f"players.{player_id}.consecutive_doubles", 0),
             ]
         )
@@ -220,6 +221,35 @@ class MoveToIslandTile(BaseTile):
                     "reason": "move_to_island",
                 },
             ]
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class IslandTile(BaseTile):
+    def on_land(
+        self,
+        *,
+        state: GameState,
+        player_id: int,
+        tile_state: TileGameState | None,
+        events: list[dict],
+        patches: list[dict],
+        context: LandingContext,
+    ) -> None:
+        patches.extend(
+            [
+                op_set(f"players.{player_id}.player_state", PlayerState.LOCKED),
+                op_set(f"players.{player_id}.state_duration", ISLAND_LOCK_TURNS),
+                op_set(f"players.{player_id}.consecutive_doubles", 0),
+            ]
+        )
+        events.append(
+            {
+                "type": ServerEventType.PLAYER_STATE_CHANGED,
+                "playerId": player_id,
+                "playerState": PlayerState.LOCKED,
+                "reason": "landed_on_island",
+            }
         )
 
 
@@ -366,6 +396,7 @@ class AiTile(BaseTile):
 
 TILE_HANDLER_TYPES: dict[TileType, type[BaseTile]] = {
     TileType.PROPERTY: PropertyTile,
+    TileType.ISLAND: IslandTile,
     TileType.MOVE_TO_ISLAND: MoveToIslandTile,
     TileType.TRAVEL: TravelTile,
     TileType.EVENT: EventTile,

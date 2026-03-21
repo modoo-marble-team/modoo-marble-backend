@@ -77,12 +77,34 @@ def process_end_turn(
             op_set("winner_id", winner["playerId"]),
         ]
 
-    next_player_id = get_next_player_id(state, player_id)
-    current_order = state.require_player(player_id).turn_order
-    next_order = state.require_player(next_player_id).turn_order
-
     new_turn = state.turn + 1
-    new_round = state.round + 1 if next_order <= current_order else state.round
+    current_player = state.require_player(player_id)
+    bonus_turn = current_player.consecutive_doubles > 0
+
+    if bonus_turn:
+        patches = [
+            op_set("current_player_id", player_id),
+            op_set("turn", new_turn),
+            op_set("round", state.round),
+            op_set("phase", PHASE_WAIT_ROLL),
+            op_set("pending_prompt", None),
+        ]
+        events = [
+            {
+                "type": ServerEventType.TURN_ENDED,
+                "playerId": player_id,
+                "nextPlayerId": player_id,
+                "turn": new_turn,
+                "round": state.round,
+                "bonusTurn": True,
+                "reason": "double_roll",
+            }
+        ]
+        return events, patches
+
+    next_player_id = get_next_player_id(state, player_id)
+    next_order = state.require_player(next_player_id).turn_order
+    new_round = state.round + 1 if next_order <= current_player.turn_order else state.round
 
     patches = [
         op_set("current_player_id", next_player_id),
