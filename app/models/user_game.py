@@ -2,14 +2,14 @@ from tortoise import fields, models
 
 
 class UserGame(models.Model):
-    id = fields.IntField(primary_key=True)
+    id = fields.IntField(pk=True)
 
     # "models.User", "models.Game" 문자열 참조를 통해 결합도를 낮춥니다.
     user = fields.ForeignKeyField(
-        "models.User", related_name="game_records", db_index=True
+        "models.User", related_name="game_records", index=True
     )
     game = fields.ForeignKeyField(
-        "models.Game", related_name="participants", db_index=True
+        "models.Game", related_name="participants", index=True
     )
 
     tolls_paid = fields.BigIntField(default=0)

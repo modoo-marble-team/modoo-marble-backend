@@ -7,7 +7,7 @@ from tortoise import Model, fields
 
 
 class User(Model):
-    id = fields.IntField(primary_key=True)
+    id = fields.IntField(pk=True)
     kakao_id = fields.CharField(max_length=50, null=True, unique=True)
     nickname = fields.CharField(max_length=20, unique=True)
     hashed_password = fields.CharField(max_length=128, null=True)
