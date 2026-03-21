@@ -311,16 +311,11 @@ def _apply_money_delta(
     return patches, events
 
 
-def _get_global_toll_multiplier(state: GameState) -> float:
-    if state.global_effects.toll_multiplier_turns_remaining <= 0:
+def _get_global_multiplier(state: GameState, effect_name: str) -> float:
+    turns_remaining = getattr(state.global_effects, f"{effect_name}_turns_remaining")
+    if turns_remaining <= 0:
         return 1.0
-    return float(state.global_effects.toll_multiplier_value)
-
-
-def _get_global_purchase_multiplier(state: GameState) -> float:
-    if state.global_effects.price_multiplier_turns_remaining <= 0:
-        return 1.0
-    return float(state.global_effects.price_multiplier_value)
+    return float(getattr(state.global_effects, f"{effect_name}_value"))
 
 
 def _get_toll_amount(state: GameState, tile_id: int, building_level: int) -> int:
@@ -328,14 +323,14 @@ def _get_toll_amount(state: GameState, tile_id: int, building_level: int) -> int
     normalized_level = max(0, min(building_level, len(tile_def.tolls) - 1))
     return _apply_price_multiplier(
         tile_def.tolls[normalized_level],
-        _get_global_toll_multiplier(state),
+        _get_global_multiplier(state, "toll_multiplier"),
     )
 
 
 def _get_purchase_cost(state: GameState, tile_id: int) -> int:
     return _apply_price_multiplier(
         TILE_MAP[tile_id].price,
-        _get_global_purchase_multiplier(state),
+        _get_global_multiplier(state, "price_multiplier"),
     )
 
 
@@ -344,7 +339,7 @@ def _get_build_cost(state: GameState, tile_id: int, building_level: int) -> int:
     normalized_level = max(0, min(building_level, len(tile_def.build_costs) - 1))
     return _apply_price_multiplier(
         tile_def.build_costs[normalized_level],
-        _get_global_purchase_multiplier(state),
+        _get_global_multiplier(state, "price_multiplier"),
     )
 
 
