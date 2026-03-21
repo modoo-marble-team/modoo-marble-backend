@@ -223,6 +223,62 @@ class GivePropertyCardEffect(BaseCardEffect):
         return events, patches
 
 
+@dataclass(frozen=True, slots=True)
+class TollMultiplierCardEffect(BaseCardEffect):
+    def apply(
+        self,
+        *,
+        state: GameState,
+        player_id: int,
+        card: dict,
+        context: CardEffectContext,
+    ) -> ActionResult:
+        del player_id, context
+        duration = int(card.get("duration", 3))
+        multiplier = float(card.get("multiplier", 1))
+        del state
+        return [], [
+            op_set("global_effects.toll_multiplier_turns_remaining", duration),
+            op_set("global_effects.toll_multiplier_value", multiplier),
+        ]
+
+
+@dataclass(frozen=True, slots=True)
+class PriceMultiplierCardEffect(BaseCardEffect):
+    def apply(
+        self,
+        *,
+        state: GameState,
+        player_id: int,
+        card: dict,
+        context: CardEffectContext,
+    ) -> ActionResult:
+        del player_id, context, state
+        duration = int(card.get("duration", 3))
+        multiplier = float(card.get("multiplier", 1))
+        return [], [
+            op_set("global_effects.price_multiplier_turns_remaining", duration),
+            op_set("global_effects.price_multiplier_value", multiplier),
+        ]
+
+
+@dataclass(frozen=True, slots=True)
+class ExtraTurnCardEffect(BaseCardEffect):
+    def apply(
+        self,
+        *,
+        state: GameState,
+        player_id: int,
+        card: dict,
+        context: CardEffectContext,
+    ) -> ActionResult:
+        del state, context
+        duration = int(card.get("duration", 1))
+        return [], [
+            op_inc(f"players.{player_id}.extra_turn_effect_turns_remaining", duration)
+        ]
+
+
 CARD_EFFECT_TYPES: dict[str, type[BaseCardEffect]] = {
     "GAIN_MONEY": GainMoneyCardEffect,
     "LOSE_MONEY": LoseMoneyCardEffect,
@@ -230,6 +286,9 @@ CARD_EFFECT_TYPES: dict[str, type[BaseCardEffect]] = {
     "MOVE_BACKWARD": MoveBackwardCardEffect,
     "STEAL_PROPERTY": StealPropertyCardEffect,
     "GIVE_PROPERTY": GivePropertyCardEffect,
+    "TOLL_MULTIPLIER": TollMultiplierCardEffect,
+    "PRICE_MULTIPLIER": PriceMultiplierCardEffect,
+    "EXTRA_TURN": ExtraTurnCardEffect,
 }
 
 

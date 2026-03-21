@@ -16,13 +16,20 @@ class CardDefinition:
     type: str
     amount: int
     description: str
+    payload: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> CardDefinition:
+        payload = {
+            str(key): value
+            for key, value in data.items()
+            if key not in {"type", "amount", "description"}
+        }
         return cls(
             type=str(data["type"]),
             amount=int(data.get("amount", 0)),
             description=str(data.get("description", "")),
+            payload=payload,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -30,6 +37,7 @@ class CardDefinition:
             "type": self.type,
             "amount": self.amount,
             "description": self.description,
+            **self.payload,
         }
 
 

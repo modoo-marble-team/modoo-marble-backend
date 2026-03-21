@@ -123,9 +123,7 @@ def test_locked_player_is_released_after_two_failed_turns(monkeypatch):
     assert state.require_player(1).player_state == PlayerState.LOCKED
     assert state.require_player(1).state_duration == 1
     assert not any(event["type"] == "PLAYER_MOVED" for event in first_events)
-    assert not any(
-        event["type"] == "PLAYER_STATE_CHANGED" for event in first_events
-    )
+    assert not any(event["type"] == "PLAYER_STATE_CHANGED" for event in first_events)
 
     _end_events, end_patches = process_end_turn(state, 1)
     apply_patches(state, end_patches)
@@ -999,6 +997,171 @@ def test_chance_card_lose_money_decreases_balance(monkeypatch):
 
     assert state.require_player(1).balance == INITIAL_BALANCE - 15000
     assert any(event["type"] == "CHANCE_RESOLVED" for event in events)
+
+
+def test_toll_multiplier_card_applies_global_toll_boost_and_ticks_down(monkeypatch):
+    state = make_state()
+    state.require_player(2).current_tile_id = 3
+    state.tile(1).owner_id = 1
+
+    monkeypatch.setattr(
+        "app.game.rules.random.choice",
+        lambda _pool: {
+            "type": "TOLL_MULTIPLIER",
+            "duration": 3,
+            "multiplier": 2,
+            "description": "olympics",
+        },
+    )
+
+    events, patches = resolve_landing(state, 2, 3)
+    apply_patches(state, patches)
+
+    assert state.global_effects.toll_multiplier_turns_remaining == 3
+    assert state.global_effects.toll_multiplier_value == 2
+    assert any(
+        event["type"] == "CHANCE_RESOLVED"
+        and event["chance"]["type"] == "TOLL_MULTIPLIER"
+        for event in events
+    )
+
+    toll_events, toll_patches = resolve_landing(state, 2, 1)
+    apply_patches(state, toll_patches)
+
+    prompt = state.pending_prompt
+    assert prompt is not None
+    assert prompt.payload["toll"] == TILE_MAP[1].tolls[0] * 2
+    assert not toll_events
+
+    state.current_player_id = 2
+    state.phase = "RESOLVING"
+    end_events, end_patches = process_end_turn(state, 2)
+    apply_patches(state, end_patches)
+
+    assert end_events[0]["type"] == "TURN_ENDED"
+    assert state.global_effects.toll_multiplier_turns_remaining == 2
+
+
+def test_toll_multiplier_card_overwrites_existing_global_effect(monkeypatch):
+    state = make_state()
+    state.require_player(2).current_tile_id = 3
+    state.global_effects.toll_multiplier_turns_remaining = 2
+    state.global_effects.toll_multiplier_value = 2
+
+    monkeypatch.setattr(
+        "app.game.rules.random.choice",
+        lambda _pool: {
+            "type": "TOLL_MULTIPLIER",
+            "duration": 3,
+            "multiplier": 0.5,
+            "description": "pandemic",
+        },
+    )
+
+    _events, patches = resolve_landing(state, 2, 3)
+    apply_patches(state, patches)
+
+    assert state.global_effects.toll_multiplier_turns_remaining == 3
+    assert state.global_effects.toll_multiplier_value == 0.5
+
+
+def test_toll_multiplier_can_reduce_toll_prompt_amount():
+    state = make_state()
+    state.global_effects.toll_multiplier_turns_remaining = 3
+    state.global_effects.toll_multiplier_value = 0.5
+    state.tile(1).owner_id = 1
+
+    _events, patches = resolve_landing(state, 2, 1)
+    apply_patches(state, patches)
+
+    prompt = state.pending_prompt
+    assert prompt is not None
+    assert prompt.payload["toll"] == TILE_MAP[1].tolls[0] // 2
+
+
+def test_inflation_increases_purchase_and_build_costs():
+    state = make_state()
+    state.global_effects.price_multiplier_turns_remaining = 3
+    state.global_effects.price_multiplier_value = 1.5
+
+    _events, patches = resolve_landing(state, 1, 1)
+    apply_patches(state, patches)
+
+    prompt = state.pending_prompt
+    assert prompt is not None
+    assert prompt.type == "BUY_OR_SKIP"
+    assert prompt.payload["price"] == 45000
+
+    _prompt_events, prompt_patches = process_prompt_response(
+        state,
+        player_id=1,
+        prompt_id=prompt.prompt_id,
+        choice="BUY",
+    )
+    apply_patches(state, prompt_patches)
+
+    assert state.require_player(1).balance == INITIAL_BALANCE - 45000
+
+    build_prompt = state.pending_prompt
+    assert build_prompt is not None
+    assert build_prompt.type == "BUILD_OR_SKIP"
+    assert build_prompt.payload["buildCost"] == 30000
+
+    _build_events, build_patches = process_prompt_response(
+        state,
+        player_id=1,
+        prompt_id=build_prompt.prompt_id,
+        choice="BUILD",
+    )
+    apply_patches(state, build_patches)
+
+    assert state.require_player(1).balance == INITIAL_BALANCE - 75000
+
+
+def test_extra_turn_card_grants_bonus_turn_after_double_chain(monkeypatch):
+    state = make_state()
+    state.require_player(1).current_tile_id = 3
+
+    monkeypatch.setattr(
+        "app.game.rules.random.choice",
+        lambda _pool: {
+            "type": "EXTRA_TURN",
+            "duration": 2,
+            "description": "traffic",
+        },
+    )
+
+    _events, patches = resolve_landing(state, 1, 3)
+    apply_patches(state, patches)
+
+    assert state.require_player(1).extra_turn_effect_turns_remaining == 2
+
+    state.phase = "RESOLVING"
+    state.require_player(1).consecutive_doubles = 1
+    first_end_events, first_end_patches = process_end_turn(state, 1)
+    apply_patches(state, first_end_patches)
+
+    assert first_end_events[0]["reason"] == "double_roll"
+    assert state.require_player(1).extra_turn_effect_turns_remaining == 2
+    assert state.require_player(1).extra_turn_effect_active is False
+
+    state.phase = "RESOLVING"
+    state.require_player(1).consecutive_doubles = 0
+    second_end_events, second_end_patches = process_end_turn(state, 1)
+    apply_patches(state, second_end_patches)
+
+    assert second_end_events[0]["reason"] == "extra_turn_effect"
+    assert second_end_events[0]["nextPlayerId"] == 1
+    assert state.require_player(1).extra_turn_effect_turns_remaining == 1
+    assert state.require_player(1).extra_turn_effect_active is True
+
+    state.phase = "RESOLVING"
+    third_end_events, third_end_patches = process_end_turn(state, 1)
+    apply_patches(state, third_end_patches)
+
+    assert third_end_events[0]["nextPlayerId"] == 2
+    assert state.require_player(1).extra_turn_effect_turns_remaining == 1
+    assert state.require_player(1).extra_turn_effect_active is False
 
 
 def test_chance_move_card_resolves_before_move_and_chains_into_property_prompt(

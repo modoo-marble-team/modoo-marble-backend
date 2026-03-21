@@ -22,7 +22,9 @@ async def test_disconnect_keeps_user_online_when_another_socket_exists(monkeypat
     broadcast_status = AsyncMock()
     schedule_cleanup = Mock()
 
-    monkeypatch.setattr(main, "handle_game_socket_disconnect", handle_game_socket_disconnect)
+    monkeypatch.setattr(
+        main, "handle_game_socket_disconnect", handle_game_socket_disconnect
+    )
     monkeypatch.setattr(main, "set_offline", set_offline)
     monkeypatch.setattr(main, "_broadcast_user_status", broadcast_status)
     monkeypatch.setattr(main, "_schedule_room_disconnect_cleanup", schedule_cleanup)
@@ -61,7 +63,9 @@ async def test_disconnect_schedules_cleanup_for_last_socket(monkeypatch):
     broadcast_status = AsyncMock()
     schedule_cleanup = Mock()
 
-    monkeypatch.setattr(main, "handle_game_socket_disconnect", handle_game_socket_disconnect)
+    monkeypatch.setattr(
+        main, "handle_game_socket_disconnect", handle_game_socket_disconnect
+    )
     monkeypatch.setattr(main, "set_offline", set_offline)
     monkeypatch.setattr(main, "_broadcast_user_status", broadcast_status)
     monkeypatch.setattr(main, "_schedule_room_disconnect_cleanup", schedule_cleanup)
