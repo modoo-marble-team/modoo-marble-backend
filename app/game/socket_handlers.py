@@ -394,7 +394,7 @@ def register_game_handlers(
                     action_id=action_id,
                     action_type=action_type,
                     code="GAME_NOT_FOUND",
-                    message="???????? ????????.",
+                    message="게임을 찾을 수 없습니다.",
                     revision=-1,
                 ),
                 to=sid,
@@ -404,7 +404,7 @@ def register_game_handlers(
             await emit_desync_error(
                 sid=sid,
                 game_id=game_id,
-                message="????????????? ?????? ???????????",
+                message="클라이언트 상태가 서버보다 오래되었습니다.",
             )
             return
         except GameMembershipError:
@@ -412,7 +412,7 @@ def register_game_handlers(
                 sid=sid,
                 game_id=str(game_id),
                 code="NOT_GAME_MEMBER",
-                message="??? ?????? ??????.",
+                message="게임 참가자가 아닙니다.",
             )
             return
         except GameActionError as exc:
@@ -546,7 +546,7 @@ def register_game_handlers(
                     action_id=action_id,
                     action_type=PROMPT_RESPONSE_ACK_TYPE,
                     code="GAME_NOT_FOUND",
-                    message="???????? ????????.",
+                    message="게임을 찾을 수 없습니다.",
                     revision=-1,
                     prompt_id=prompt_id,
                 ),
@@ -557,7 +557,7 @@ def register_game_handlers(
             await emit_desync_error(
                 sid=sid,
                 game_id=game_id,
-                message="????????????? ?????? ???????????",
+                message="클라이언트 상태가 서버보다 오래되었습니다.",
             )
             return
         except GameMembershipError:
@@ -565,7 +565,7 @@ def register_game_handlers(
                 sid=sid,
                 game_id=str(game_id),
                 code="NOT_GAME_MEMBER",
-                message="??? ?????? ??????.",
+                message="게임 참가자가 아닙니다.",
             )
             return
         except GameActionError as exc:
