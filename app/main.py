@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 
 import socketio
@@ -34,6 +35,7 @@ sio = socketio.AsyncServer(
 )
 
 _sid_to_user: dict[str, int] = {}
+_room_disconnect_tasks: dict[int, asyncio.Task[None]] = {}
 
 register_game_handlers(sio, _sid_to_user)
 register_lobby_handlers(sio, _sid_to_user)
@@ -49,6 +51,29 @@ async def _broadcast_user_status(user_id: int, nickname: str, status: str) -> No
             "status": status,
         },
     )
+
+
+def _cancel_room_disconnect_cleanup(user_id: int) -> None:
+    task = _room_disconnect_tasks.pop(user_id, None)
+    if task is not None:
+        task.cancel()
+
+
+def _schedule_room_disconnect_cleanup(user_id: int) -> None:
+    if user_id in _room_disconnect_tasks:
+        return
+
+    async def _cleanup() -> None:
+        try:
+            await _handle_room_disconnect(user_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("room disconnect cleanup task 실패", user_id=user_id)
+        finally:
+            _room_disconnect_tasks.pop(user_id, None)
+
+    _room_disconnect_tasks[user_id] = asyncio.create_task(_cleanup())
 
 
 @sio.event
@@ -76,6 +101,7 @@ async def connect(sid: str, environ: dict, auth_data: dict | None):
         if not user:
             raise ConnectionRefusedError("사용자를 찾을 수 없습니다.")
 
+        _cancel_room_disconnect_cleanup(int(user.id))
         _sid_to_user[sid] = int(user.id)
         await handle_game_socket_connect(sid=sid, user_id=int(user.id))
 
@@ -99,9 +125,15 @@ async def disconnect(sid: str):
             nickname = user.nickname if user else ""
 
             await handle_game_socket_disconnect(sid=sid, user_id=int(user_id))
-            await _handle_room_disconnect(int(user_id))
-            await set_offline(user_id=str(user_id))
-            await _broadcast_user_status(int(user_id), nickname, "offline")
+            _sid_to_user.pop(sid, None)
+
+            has_other_socket = any(
+                mapped_user_id == int(user_id) for mapped_user_id in _sid_to_user.values()
+            )
+            if not has_other_socket:
+                _schedule_room_disconnect_cleanup(int(user_id))
+                await set_offline(user_id=str(user_id))
+                await _broadcast_user_status(int(user_id), nickname, "offline")
     except Exception:
         pass
     finally:

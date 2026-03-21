@@ -35,28 +35,41 @@ def _find_winner(state: GameState) -> dict:
     return winner
 
 
+def _tick_global_effect(
+    *,
+    turns_path: str,
+    turns_remaining: int,
+    reset_path: str,
+    reset_value: float,
+) -> list[dict]:
+    if turns_remaining <= 0:
+        return []
+
+    next_turns = turns_remaining - 1
+    patches = [op_set(turns_path, next_turns)]
+    if next_turns == 0:
+        patches.append(op_set(reset_path, reset_value))
+    return patches
+
+
 def _global_effect_tick_patches(state: GameState) -> list[dict]:
     patches: list[dict] = []
-    if state.global_effects.toll_multiplier_turns_remaining > 0:
-        next_turns = state.global_effects.toll_multiplier_turns_remaining - 1
-        patches.append(
-            op_set(
-                "global_effects.toll_multiplier_turns_remaining",
-                next_turns,
-            )
+    patches.extend(
+        _tick_global_effect(
+            turns_path="global_effects.toll_multiplier_turns_remaining",
+            turns_remaining=state.global_effects.toll_multiplier_turns_remaining,
+            reset_path="global_effects.toll_multiplier_value",
+            reset_value=1.0,
         )
-        if next_turns == 0:
-            patches.append(op_set("global_effects.toll_multiplier_value", 1.0))
-    if state.global_effects.price_multiplier_turns_remaining > 0:
-        next_turns = state.global_effects.price_multiplier_turns_remaining - 1
-        patches.append(
-            op_set(
-                "global_effects.price_multiplier_turns_remaining",
-                next_turns,
-            )
+    )
+    patches.extend(
+        _tick_global_effect(
+            turns_path="global_effects.price_multiplier_turns_remaining",
+            turns_remaining=state.global_effects.price_multiplier_turns_remaining,
+            reset_path="global_effects.price_multiplier_value",
+            reset_value=1.0,
         )
-        if next_turns == 0:
-            patches.append(op_set("global_effects.price_multiplier_value", 1.0))
+    )
     return patches
 
 
