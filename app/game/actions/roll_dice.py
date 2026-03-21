@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random
 
-from app.game.board import BOARD_SIZE, ISLAND_TILE_ID, START_SALARY, TILE_MAP
+from app.game.board import BOARD_SIZE, START_SALARY, TILE_MAP
 from app.game.enums import PlayerState, ServerEventType
 from app.game.errors import GameActionError
 from app.game.models import GameState
@@ -128,8 +128,8 @@ def process_roll_dice(
             patches.extend(landing_patches)
             return events, patches
 
-        new_duration = player.state_duration - 1
-        if new_duration <= 0:
+        new_duration = max(player.state_duration - 1, 0)
+        if new_duration == 0:
             patches.extend(
                 [
                     op_set(f"players.{player_id}.player_state", PlayerState.NORMAL),
@@ -149,35 +149,6 @@ def process_roll_dice(
         return events, patches
 
     new_consecutive = player.consecutive_doubles + 1 if is_double else 0
-
-    if is_double and new_consecutive >= 3:
-        from_tile = player.current_tile_id
-        patches.extend(
-            [
-                op_set(f"players.{player_id}.current_tile_id", ISLAND_TILE_ID),
-                op_set(f"players.{player_id}.player_state", PlayerState.LOCKED),
-                op_set(f"players.{player_id}.state_duration", 3),
-                op_set(f"players.{player_id}.consecutive_doubles", 0),
-            ]
-        )
-        events.extend(
-            [
-                {
-                    "type": ServerEventType.PLAYER_MOVED,
-                    "playerId": player_id,
-                    "fromTileId": from_tile,
-                    "toTileId": ISLAND_TILE_ID,
-                    "trigger": "triple_double",
-                },
-                {
-                    "type": ServerEventType.PLAYER_STATE_CHANGED,
-                    "playerId": player_id,
-                    "playerState": PlayerState.LOCKED,
-                    "reason": "triple_double",
-                },
-            ]
-        )
-        return events, patches
 
     patches.append(op_set(f"players.{player_id}.consecutive_doubles", new_consecutive))
 
