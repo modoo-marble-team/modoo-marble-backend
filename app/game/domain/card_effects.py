@@ -200,7 +200,7 @@ class GivePropertyCardEffect(BaseCardEffect):
             return [], []
 
         given_tile_id = context.choose_random(player.owned_tiles)
-        receiver_id = int(context.choose_random(receivers))
+        receiver_id = context.choose_random(receivers)
         patches = [
             op_set(f"tiles.{given_tile_id}.owner_id", receiver_id),
             op_set(f"tiles.{given_tile_id}.building_level", 0),
