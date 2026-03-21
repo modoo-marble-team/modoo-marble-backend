@@ -149,6 +149,8 @@ class PlayerGameState(JsonModel):
     owned_tiles: list[int] = field(default_factory=list)
     building_levels: dict[int, int] = field(default_factory=dict)
     turn_order: int = 0
+    extra_turn_effect_turns_remaining: int = 0
+    extra_turn_effect_active: bool = False
 
     @property
     def is_bankrupt(self) -> bool:
@@ -166,6 +168,14 @@ class TileGameState(JsonModel):
 
 
 @dataclass(slots=True)
+class GlobalEffectState(JsonModel):
+    toll_multiplier_turns_remaining: int = 0
+    toll_multiplier_value: float = 1.0
+    price_multiplier_turns_remaining: int = 0
+    price_multiplier_value: float = 1.0
+
+
+@dataclass(slots=True)
 class GameState(JsonModel):
     game_id: str
     room_id: str
@@ -178,6 +188,7 @@ class GameState(JsonModel):
     players: dict[int, PlayerGameState]
     tiles: dict[int, TileGameState]
     pending_prompt: PendingPrompt | None
+    global_effects: GlobalEffectState = field(default_factory=GlobalEffectState)
     ruleset_version: str = GAME_RULESET_VERSION
     winner_id: int | None = None
 

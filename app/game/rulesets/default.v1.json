@@ -31,9 +31,9 @@
       "build_costs": [25000, 50000, 70000]
     },
     "3": {
-      "price": 70000,
-      "tolls": [15000, 30000, 95000, 175000],
-      "build_costs": [80000, 190000, 250000]
+        "price": 70000,
+        "tolls": [20000, 40000, 90000, 180000],
+        "build_costs": [50000, 90000, 140000]
     },
     "4": {
       "price": 110000,
@@ -41,9 +41,9 @@
       "build_costs": [80000, 170000, 300000]
     },
     "5": {
-      "price": 120000,
-      "tolls": [40000, 90000, 200000, 400000],
-      "build_costs": [100000, 200000, 400000]
+      "price": 150000,
+      "tolls": [45000, 90000, 180000, 320000],
+      "build_costs": [100000, 180000, 320000]
     }
   },
   "board": [
@@ -81,22 +81,30 @@
     {"tile_id": 31, "name": "서울", "tile_type": "PROPERTY", "tier": 5}
   ],
   "chance_cards": [
-    {"type": "GAIN_MONEY", "amount": 30000, "description": "보너스 3억원을 획득합니다."},
-    {"type": "GAIN_MONEY", "amount": 20000, "description": "보너스 2억원을 획득합니다."},
-    {"type": "GAIN_MONEY", "amount": 10000, "description": "보너스 1억원을 획득합니다."},
-    {"type": "LOSE_MONEY", "amount": 15000, "description": "1억 5천만원을 지불합니다."},
-    {"type": "LOSE_MONEY", "amount": 20000, "description": "2억원을 지불합니다."},
-    {"type": "LOSE_MONEY", "amount": 30000, "description": "3억원을 지불합니다."},
+    {"type": "GAIN_MONEY", "amount": 30000, "description": "복권에 당첨되어 3억원을 획득합니다."},
+    {"type": "GAIN_MONEY", "amount": 20000, "description": "보유 주식이 올라 2억원을 획득합니다."},
+    {"type": "GAIN_MONEY", "amount": 10000, "description": "지원금 1억원을 획득합니다."},
+    {"type": "LOSE_MONEY", "amount": 15000, "description": "병원비로 1억 5천만원을 지불합니다."},
+    {"type": "LOSE_MONEY", "amount": 20000, "description": "벌금으로 2억원을 지불합니다."},
+    {"type": "LOSE_MONEY", "amount": 30000, "description": "세금으로 3억원을 지불합니다."},
     {"type": "MOVE_FORWARD", "amount": 3, "description": "앞으로 3칸 이동합니다."},
     {"type": "MOVE_FORWARD", "amount": 5, "description": "앞으로 5칸 이동합니다."},
     {"type": "MOVE_BACKWARD", "amount": 2, "description": "뒤로 2칸 이동합니다."},
     {"type": "MOVE_BACKWARD", "amount": 3, "description": "뒤로 3칸 이동합니다."},
     {"type": "STEAL_PROPERTY", "amount": 0, "description": "상대의 땅 하나를 가져옵니다."},
-    {"type": "GIVE_PROPERTY", "amount": 0, "description": "내 땅 하나를 넘겨줍니다."}
+    {"type": "GIVE_PROPERTY", "amount": 0, "description": "내 땅 하나를 넘겨줍니다."},
+    {"type": "TOLL_MULTIPLIER", "duration": 3, "multiplier": 2, "description": "올림픽 개최. 3턴 동안 모든 통행료가 2배가 됩니다."},
+    {"type": "TOLL_MULTIPLIER", "duration": 3, "multiplier": 0.5, "description": "전염병 확산. 3턴 동안 모든 통행료가 절반이 됩니다."},
+    {"type": "PRICE_MULTIPLIER", "duration": 3, "multiplier": 1.5, "description": "인플레이션 발생. 3턴 동안 토지/건설 비용이 50% 증가 됩니다."},
+    {"type": "PRICE_MULTIPLIER", "duration": 3, "multiplier": 0.7, "description": "디플레이션 발생. 3턴 동안 토지/건설 비용이 30% 감소 됩니다."},
+    {"type": "EXTRA_TURN", "duration": 2, "description": "교통카드를 얻었습니다. 추가턴 2회 획득합니다."},
+    {"type": "EXTRA_TURN", "duration": 3, "description": "자동차를 얻었습니다. 추가턴 3회 획득합니다."}
   ],
   "event_cards": [
-    {"type": "GAIN_MONEY", "amount": 20000, "description": "축하금 2억원을 받습니다."},
-    {"type": "GAIN_MONEY", "amount": 10000, "description": "지원금 1억원을 받습니다."},
-    {"type": "LOSE_MONEY", "amount": 10000, "description": "벌금 1억원을 냅니다."}
+    {"type": "GAIN_MONEY", "amount": 30000, "description": "복권에 당첨되어 3억원을 획득합니다."},
+    {"type": "GAIN_MONEY", "amount": 20000, "description": "보유 주식이 올라 2억원을 획득합니다."},
+    {"type": "GAIN_MONEY", "amount": 10000, "description": "지원금 1억원을 획득합니다."},
+    {"type": "LOSE_MONEY", "amount": 15000, "description": "병원비로 1억 5천만원을 지불합니다."},
+    {"type": "LOSE_MONEY", "amount": 20000, "description": "벌금으로 2억원을 지불합니다."}
   ]
 }

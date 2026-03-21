@@ -1,7 +1,4 @@
-"""타일 착지 규칙을 모아 둔 모듈.
-
-각 타일 클래스는 '이 칸에 도착했을 때 무슨 일이 일어나는지'만 담당한다.
-"""
+"""Tile landing handlers for board spaces."""
 
 from __future__ import annotations
 
@@ -10,9 +7,9 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, TypeAlias
 
-from app.game.game_rules import ISLAND_LOCK_TURNS
 from app.game.domain.ruleset import TileDefinition
 from app.game.enums import PlayerState, ServerEventType, TileType
+from app.game.game_rules import ISLAND_LOCK_TURNS
 from app.game.models import GameState, PromptChoice, TileGameState
 from app.game.patch import op_set
 from app.game.state import apply_patches
@@ -22,7 +19,6 @@ ActionResult: TypeAlias = tuple[list[dict], list[dict]]
 
 @dataclass(frozen=True, slots=True)
 class LandingContext:
-    # 타일 규칙이 바깥 기능을 호출할 때 쓰는 함수 묶음.
     phase_wait_prompt: str
     phase_resolving: str
     phase_game_over: str
@@ -35,8 +31,10 @@ class LandingContext:
     get_object_particle: Callable[[str], str]
     format_money: Callable[[int], str]
     get_build_stage_name: Callable[[int], str]
-    get_toll_amount: Callable[[int, int], int]
-    get_acquisition_cost: Callable[[int, int], int]
+    get_purchase_cost: Callable[[GameState, int], int]
+    get_build_cost: Callable[[GameState, int, int], int]
+    get_toll_amount: Callable[[GameState, int, int], int]
+    get_acquisition_cost: Callable[[GameState, int, int], int]
     player_name: Callable[[GameState, int], str]
     apply_card: Callable[[GameState, int, dict], ActionResult]
     append_landed_event: Callable[[list[dict], int, int], None]
@@ -48,7 +46,6 @@ class LandingContext:
 
 @dataclass(frozen=True, slots=True)
 class BaseTile:
-    # 모든 타일 핸들러의 공통 인터페이스.
     definition: TileDefinition
 
     def on_land(
@@ -76,8 +73,6 @@ class PropertyTile(BaseTile):
         patches: list[dict],
         context: LandingContext,
     ) -> None:
-        # 땅 타일은 소유 상태에 따라
-        # 구매 / 건설 / 통행료 프롬프트 중 하나를 연다.
         if tile_state is None:
             return
 
@@ -86,6 +81,7 @@ class PropertyTile(BaseTile):
         tile_id = self.definition.tile_id
 
         if owner_id is None:
+            purchase_cost = context.get_purchase_cost(state, tile_id)
             prompt = context.make_prompt(
                 prompt_type="BUY_OR_SKIP",
                 player_id=player_id,
@@ -94,7 +90,7 @@ class PropertyTile(BaseTile):
                     f"{self.definition.name}에 도착했습니다. "
                     f"{self.definition.name}"
                     f"{context.get_object_particle(self.definition.name)} "
-                    f"{context.format_money(self.definition.price)}에 구매하시겠습니까?"
+                    f"{context.format_money(purchase_cost)}에 구매하시겠습니까?"
                 ),
                 choices=[
                     PromptChoice(id="buy", label="구매", value="BUY"),
@@ -103,7 +99,7 @@ class PropertyTile(BaseTile):
                 payload={
                     "tileId": tile_id,
                     "tileName": self.definition.name,
-                    "price": self.definition.price,
+                    "price": purchase_cost,
                     "buildingLevel": building_level,
                 },
                 default_choice_value="SKIP",
@@ -117,8 +113,8 @@ class PropertyTile(BaseTile):
             return
 
         if owner_id == player_id and building_level < context.max_building_level:
-            build_cost = self.definition.build_costs[building_level]
-            next_toll = context.get_toll_amount(tile_id, building_level + 1)
+            build_cost = context.get_build_cost(state, tile_id, building_level)
+            next_toll = context.get_toll_amount(state, tile_id, building_level + 1)
             next_stage_name = context.get_build_stage_name(building_level + 1)
             prompt = context.make_prompt(
                 prompt_type="BUILD_OR_SKIP",
@@ -152,8 +148,10 @@ class PropertyTile(BaseTile):
             return
 
         if owner_id != player_id:
-            toll = context.get_toll_amount(tile_id, building_level)
-            acquisition_cost = context.get_acquisition_cost(tile_id, building_level)
+            toll = context.get_toll_amount(state, tile_id, building_level)
+            acquisition_cost = context.get_acquisition_cost(
+                state, tile_id, building_level
+            )
             owner_name = context.player_name(state, owner_id)
             prompt = context.make_prompt(
                 prompt_type="PAY_TOLL",
@@ -197,6 +195,7 @@ class MoveToIslandTile(BaseTile):
         patches: list[dict],
         context: LandingContext,
     ) -> None:
+        del state, tile_state
         patches.extend(
             [
                 op_set(f"players.{player_id}.current_tile_id", context.island_tile_id),
@@ -236,6 +235,7 @@ class IslandTile(BaseTile):
         patches: list[dict],
         context: LandingContext,
     ) -> None:
+        del state, tile_state, context
         patches.extend(
             [
                 op_set(f"players.{player_id}.player_state", PlayerState.LOCKED),
@@ -265,6 +265,7 @@ class TravelTile(BaseTile):
         patches: list[dict],
         context: LandingContext,
     ) -> None:
+        del state, tile_state, events
         prompt = context.make_prompt(
             prompt_type="TRAVEL_SELECT",
             player_id=player_id,
@@ -300,6 +301,7 @@ class EventTile(BaseTile):
         patches: list[dict],
         context: LandingContext,
     ) -> None:
+        del tile_state
         card = context.choose_random(context.event_cards)
         card_events, card_patches = context.apply_card(state, player_id, card)
         patches.extend(card_patches)
@@ -330,6 +332,7 @@ class ChanceTile(BaseTile):
         patches: list[dict],
         context: LandingContext,
     ) -> None:
+        del tile_state
         card = context.choose_random(context.chance_cards)
         card_events, card_patches = context.apply_card(state, player_id, card)
         chance_event = {
@@ -384,6 +387,7 @@ class AiTile(BaseTile):
         patches: list[dict],
         context: LandingContext,
     ) -> None:
+        del state, tile_state, patches, context
         events.append(
             {
                 "type": ServerEventType.CHANCE_RESOLVED,
@@ -407,6 +411,5 @@ TILE_HANDLER_TYPES: dict[TileType, type[BaseTile]] = {
 
 @lru_cache(maxsize=128)
 def build_tile_handler(definition: TileDefinition) -> BaseTile:
-    # 타일 타입 문자열을 실제 핸들러 객체로 바꾼다.
     handler_type = TILE_HANDLER_TYPES.get(definition.tile_type, BaseTile)
     return handler_type(definition)

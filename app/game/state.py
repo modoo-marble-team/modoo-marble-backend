@@ -67,6 +67,8 @@ def _make_initial_players(
             owned_tiles=[],
             building_levels={},
             turn_order=order,
+            extra_turn_effect_turns_remaining=0,
+            extra_turn_effect_active=False,
         )
     return players
 

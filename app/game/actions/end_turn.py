@@ -35,6 +35,31 @@ def _find_winner(state: GameState) -> dict:
     return winner
 
 
+def _global_effect_tick_patches(state: GameState) -> list[dict]:
+    patches: list[dict] = []
+    if state.global_effects.toll_multiplier_turns_remaining > 0:
+        next_turns = state.global_effects.toll_multiplier_turns_remaining - 1
+        patches.append(
+            op_set(
+                "global_effects.toll_multiplier_turns_remaining",
+                next_turns,
+            )
+        )
+        if next_turns == 0:
+            patches.append(op_set("global_effects.toll_multiplier_value", 1.0))
+    if state.global_effects.price_multiplier_turns_remaining > 0:
+        next_turns = state.global_effects.price_multiplier_turns_remaining - 1
+        patches.append(
+            op_set(
+                "global_effects.price_multiplier_turns_remaining",
+                next_turns,
+            )
+        )
+        if next_turns == 0:
+            patches.append(op_set("global_effects.price_multiplier_value", 1.0))
+    return patches
+
+
 def process_end_turn(
     state: GameState,
     player_id: int,
@@ -80,6 +105,7 @@ def process_end_turn(
     new_turn = state.turn + 1
     current_player = state.require_player(player_id)
     bonus_turn = current_player.consecutive_doubles > 0
+    global_effect_patches = _global_effect_tick_patches(state)
 
     if bonus_turn:
         patches = [
@@ -89,6 +115,7 @@ def process_end_turn(
             op_set("phase", PHASE_WAIT_ROLL),
             op_set("pending_prompt", None),
         ]
+        patches.extend(global_effect_patches)
         events = [
             {
                 "type": ServerEventType.TURN_ENDED,
@@ -102,9 +129,43 @@ def process_end_turn(
         ]
         return events, patches
 
+    extra_turn_bonus = (
+        current_player.extra_turn_effect_turns_remaining > 0
+        and not current_player.extra_turn_effect_active
+    )
+
+    if extra_turn_bonus:
+        patches = [
+            op_set("current_player_id", player_id),
+            op_set("turn", new_turn),
+            op_set("round", state.round),
+            op_set("phase", PHASE_WAIT_ROLL),
+            op_set("pending_prompt", None),
+            op_set(
+                f"players.{player_id}.extra_turn_effect_turns_remaining",
+                current_player.extra_turn_effect_turns_remaining - 1,
+            ),
+            op_set(f"players.{player_id}.extra_turn_effect_active", True),
+        ]
+        patches.extend(global_effect_patches)
+        events = [
+            {
+                "type": ServerEventType.TURN_ENDED,
+                "playerId": player_id,
+                "nextPlayerId": player_id,
+                "turn": new_turn,
+                "round": state.round,
+                "bonusTurn": True,
+                "reason": "extra_turn_effect",
+            }
+        ]
+        return events, patches
+
     next_player_id = get_next_player_id(state, player_id)
     next_order = state.require_player(next_player_id).turn_order
-    new_round = state.round + 1 if next_order <= current_player.turn_order else state.round
+    new_round = (
+        state.round + 1 if next_order <= current_player.turn_order else state.round
+    )
 
     patches = [
         op_set("current_player_id", next_player_id),
@@ -113,7 +174,9 @@ def process_end_turn(
         op_set("phase", PHASE_WAIT_ROLL),
         op_set("pending_prompt", None),
         op_set(f"players.{player_id}.consecutive_doubles", 0),
+        op_set(f"players.{player_id}.extra_turn_effect_active", False),
     ]
+    patches.extend(global_effect_patches)
     events = [
         {
             "type": ServerEventType.TURN_ENDED,
