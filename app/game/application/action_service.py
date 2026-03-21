@@ -5,8 +5,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from app.game.actions.dispatch import dispatch_game_action
 from app.game.infrastructure.state_repository import GameStateRepository

@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import random
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 from uuid import uuid4
 
 from app.game.board import BOARD_SIZE, TILE_MAP
@@ -15,29 +15,49 @@ from app.game.domain.card_effects import CardEffectContext, build_card_effect
 from app.game.domain.prompts import PromptContext, build_prompt_handler
 from app.game.domain.property_actions import (
     PropertyActionContext,
+)
+from app.game.domain.property_actions import (
     apply_build as apply_build_action,
+)
+from app.game.domain.property_actions import (
     apply_property_acquisition as apply_property_acquisition_action,
+)
+from app.game.domain.property_actions import (
     apply_purchase as apply_purchase_action,
+)
+from app.game.domain.property_actions import (
     apply_sell_property as apply_sell_property_action,
+)
+from app.game.domain.property_actions import (
     apply_toll_payment as apply_toll_payment_action,
 )
 from app.game.domain.tiles import LandingContext, build_tile_handler
 from app.game.enums import PlayerState, ServerEventType
 from app.game.errors import GameActionError
 from app.game.game_rules import (
-    BUILDING_STAGE_LABELS as _RULESET_BUILDING_STAGE_LABELS,
-    CHANCE_CARD_POOL as _RULESET_CHANCE_CARD_POOL,
-    EVENT_CARD_POOL as _RULESET_EVENT_CARD_POOL,
-    ISLAND_TILE_ID,
-    MAX_BUILDING_LEVEL as _RULESET_MAX_BUILDING_LEVEL,
-    PROMPT_TIMEOUT_SECONDS as _RULESET_PROMPT_TIMEOUT_SECONDS,
     ACQUISITION_PRICE_MULTIPLIER,
+    ISLAND_TILE_ID,
     SELL_BUILD_COST_REFUND_RATIO,
     SELL_PURCHASE_PRICE_REFUND_RATIO,
     START_SALARY,
 )
+from app.game.game_rules import (
+    BUILDING_STAGE_LABELS as _RULESET_BUILDING_STAGE_LABELS,
+)
+from app.game.game_rules import (
+    CHANCE_CARD_POOL as _RULESET_CHANCE_CARD_POOL,
+)
+from app.game.game_rules import (
+    EVENT_CARD_POOL as _RULESET_EVENT_CARD_POOL,
+)
+from app.game.game_rules import (
+    MAX_BUILDING_LEVEL as _RULESET_MAX_BUILDING_LEVEL,
+)
+from app.game.game_rules import (
+    PROMPT_TIMEOUT_SECONDS as _RULESET_PROMPT_TIMEOUT_SECONDS,
+)
 from app.game.models import GameState, PendingPrompt, PromptChoice
-from app.game.patch import op_inc, op_push, op_remove, op_set
+from app.game.patch import op_inc, op_push, op_set
 from app.game.state import apply_patches
 
 PHASE_WAIT_ROLL = "WAIT_ROLL"
@@ -552,7 +572,6 @@ def _build_property_action_context() -> PropertyActionContext:
 
 CARD_EFFECT_CONTEXT = _build_card_effect_context()
 PROPERTY_ACTION_CONTEXT = _build_property_action_context()
-
 
 
 def _apply_purchase(

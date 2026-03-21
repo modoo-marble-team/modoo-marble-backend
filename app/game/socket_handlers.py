@@ -18,8 +18,8 @@ from app.game.application import (
     GameNotFoundError,
 )
 from app.game.errors import GameActionError
-from app.game.infrastructure.state_repository import GameStateRepository
 from app.game.infrastructure.socket_presenter import GameSocketPresenter
+from app.game.infrastructure.state_repository import GameStateRepository
 from app.game.models import GameState
 from app.game.state import (
     LockAcquisitionError,

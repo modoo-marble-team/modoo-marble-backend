@@ -5,9 +5,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Callable, TypeAlias
+from typing import TypeAlias
 
 from app.game.enums import ServerEventType
 from app.game.errors import GameActionError
@@ -74,7 +75,9 @@ class BuyOrSkipPromptHandler(BasePromptHandler):
         if normalized_choice != "BUY":
             return
         tile_id = int(prompt.payload.get("tileId", -1))
-        action_events, action_patches = context.apply_purchase(state, player_id, tile_id)
+        action_events, action_patches = context.apply_purchase(
+            state, player_id, tile_id
+        )
         events.extend(action_events)
         patches.extend(action_patches)
         context.queue_follow_up_landing_prompt(

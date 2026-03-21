@@ -5,8 +5,10 @@ from app.game.actions.roll_dice import process_roll_dice
 from app.game.board import BOARD, TILE_MAP
 from app.game.enums import PlayerState, ServerEventType, TileType
 from app.game.errors import GameActionError
-from app.game.game_rules import ACQUISITION_PRICE_MULTIPLIER
-from app.game.game_rules import SELL_PURCHASE_PRICE_REFUND_RATIO
+from app.game.game_rules import (
+    ACQUISITION_PRICE_MULTIPLIER,
+    SELL_PURCHASE_PRICE_REFUND_RATIO,
+)
 from app.game.models import GameState, PlayerGameState, TileGameState
 from app.game.presentation import serialize_game_snapshot
 from app.game.rules import (
@@ -327,14 +329,10 @@ def test_owned_property_landing_can_acquire_full_property_with_buildings(monkeyp
     assert state.tile(4).owner_id == 2
     assert state.tile(4).building_level == 2
     assert state.require_player(1).balance == (
-        INITIAL_BALANCE
-        + tile.tolls[2]
-        + expected_acquisition_cost
+        INITIAL_BALANCE + tile.tolls[2] + expected_acquisition_cost
     )
     assert state.require_player(2).balance == (
-        INITIAL_BALANCE
-        - tile.tolls[2]
-        - expected_acquisition_cost
+        INITIAL_BALANCE - tile.tolls[2] - expected_acquisition_cost
     )
     assert state.require_player(1).owned_tiles == []
     assert state.require_player(1).building_levels == {}
@@ -640,10 +638,7 @@ def test_max_rounds_uses_total_assets_for_winner():
     assert len(game_over_events) == 1
     assert game_over_events[0]["reason"] == "max_rounds"
     assert game_over_events[0]["winner"]["playerId"] == 1
-    assert (
-        game_over_events[0]["winner"]["assets"]
-        == player_one_assets
-    )
+    assert game_over_events[0]["winner"]["assets"] == player_one_assets
     assert state.winner_id == 1
     assert state.status == "finished"
 

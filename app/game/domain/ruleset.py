@@ -18,7 +18,7 @@ class CardDefinition:
     description: str
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "CardDefinition":
+    def from_dict(cls, data: dict[str, Any]) -> CardDefinition:
         return cls(
             type=str(data["type"]),
             amount=int(data.get("amount", 0)),
@@ -42,9 +42,7 @@ class PropertyTierDefinition:
     build_costs: tuple[int, ...]
 
     @classmethod
-    def from_dict(
-        cls, tier: int, data: dict[str, Any]
-    ) -> "PropertyTierDefinition":
+    def from_dict(cls, tier: int, data: dict[str, Any]) -> PropertyTierDefinition:
         price = int(data["price"])
         return cls(
             tier=tier,
@@ -66,7 +64,7 @@ class SellRefundDefinition:
     build_cost_ratio: float
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "SellRefundDefinition":
+    def from_dict(cls, data: dict[str, Any]) -> SellRefundDefinition:
         return cls(
             purchase_price_ratio=float(data.get("purchase_price", 1.0)),
             build_cost_ratio=float(data.get("build_cost", 0.5)),
@@ -79,7 +77,7 @@ class AcquisitionDefinition:
     multiplier: float
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "AcquisitionDefinition":
+    def from_dict(cls, data: dict[str, Any]) -> AcquisitionDefinition:
         return cls(multiplier=float(data.get("multiplier", 1.0)))
 
 
@@ -96,7 +94,7 @@ class TileDefinition:
     build_costs: tuple[int, ...] = field(default_factory=tuple)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "TileDefinition":
+    def from_dict(cls, data: dict[str, Any]) -> TileDefinition:
         return cls(
             tile_id=int(data["tile_id"]),
             name=str(data["name"]),
@@ -128,7 +126,7 @@ class RuleSet:
     event_cards: tuple[CardDefinition, ...]
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "RuleSet":
+    def from_dict(cls, data: dict[str, Any]) -> RuleSet:
         property_tiers = {
             int(key): PropertyTierDefinition.from_dict(int(key), tier_data)
             for key, tier_data in dict(data.get("property_tiers", {})).items()

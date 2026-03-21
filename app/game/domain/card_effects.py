@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Callable, Sequence, TypeAlias
+from typing import Any, TypeAlias
 
 from app.game.enums import ServerEventType
 from app.game.models import GameState
@@ -139,7 +140,7 @@ class StealPropertyCardEffect(BaseCardEffect):
         context: CardEffectContext,
     ) -> ActionResult:
         # 다른 플레이어의 땅 하나를 무작위로 가져온다.
-        del context, card
+        del card
         other_players = [
             (candidate_id, candidate)
             for candidate_id, candidate in state.players.items()
@@ -185,7 +186,7 @@ class GivePropertyCardEffect(BaseCardEffect):
         context: CardEffectContext,
     ) -> ActionResult:
         # 내 땅 하나를 다른 플레이어에게 넘긴다.
-        del context, card
+        del card
         player = state.require_player(player_id)
         if not player.owned_tiles:
             return [], []

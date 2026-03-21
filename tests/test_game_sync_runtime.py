@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from app.game.enums import PlayerState
 from app.game.board import TILE_MAP
+from app.game.enums import PlayerState
 from app.game.models import GameState, PlayerGameState, TileGameState
 from app.game.state import INITIAL_BALANCE
 from app.game.sync_runtime import GameSyncRuntime
@@ -68,7 +68,9 @@ def test_winner_payload_includes_total_assets():
 
     assert winner["playerId"] == 1
     assert winner["balance"] == INITIAL_BALANCE + 30000
-    assert winner["assets"] == INITIAL_BALANCE + 30000 + tile.price + tile.build_costs[0]
+    assert (
+        winner["assets"] == INITIAL_BALANCE + 30000 + tile.price + tile.build_costs[0]
+    )
 
 
 @pytest.mark.asyncio

@@ -5,8 +5,8 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 from app.game.models import GameState
 from app.game.state import game_lock, get_game_state, save_game_state

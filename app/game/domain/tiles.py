@@ -5,14 +5,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Callable, Sequence, TypeAlias
+from typing import Any, TypeAlias
 
 from app.game.domain.ruleset import TileDefinition
 from app.game.enums import PlayerState, ServerEventType, TileType
 from app.game.models import GameState, PromptChoice, TileGameState
-from app.game.patch import op_inc, op_set
+from app.game.patch import op_set
 from app.game.state import apply_patches
 
 ActionResult: TypeAlias = tuple[list[dict], list[dict]]
@@ -319,7 +320,9 @@ class ChanceTile(BaseTile):
 
             preview_state = state.clone()
             apply_patches(preview_state, patches)
-            destination_tile_id = preview_state.require_player(player_id).current_tile_id
+            destination_tile_id = preview_state.require_player(
+                player_id
+            ).current_tile_id
             context.queue_follow_up_landing_resolution(
                 state,
                 player_id,

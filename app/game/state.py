@@ -12,9 +12,8 @@ from dataclasses import is_dataclass
 from typing import Any
 
 from app.game.board import BOARD
-from app.game.enums import TileType
+from app.game.enums import PlayerState, TileType
 from app.game.game_rules import INITIAL_BALANCE
-from app.game.enums import PlayerState
 from app.game.models import GameState, PlayerGameState, TileGameState
 from app.redis_client import get_redis
 
