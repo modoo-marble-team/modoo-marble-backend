@@ -237,6 +237,37 @@ def test_property_landing_skip_does_not_transfer_ownership(monkeypatch):
     assert not any(event["type"] == "BOUGHT_PROPERTY" for event in prompt_events)
 
 
+def test_property_purchase_requires_balance_above_price(monkeypatch):
+    state = make_state()
+    tile = TILE_MAP[4]
+    state.require_player(1).balance = tile.price
+    dice_values = iter([2, 2])
+
+    monkeypatch.setattr(
+        "app.game.actions.roll_dice.random.randint",
+        lambda _start, _end: next(dice_values),
+    )
+
+    _events, patches = process_roll_dice(state, 1)
+    apply_patches(state, patches)
+
+    prompt = state.pending_prompt
+    assert prompt is not None
+    assert prompt.type == "BUY_OR_SKIP"
+
+    try:
+        process_prompt_response(
+            state,
+            player_id=1,
+            prompt_id=prompt.prompt_id,
+            choice="BUY",
+        )
+    except GameActionError as exc:
+        assert exc.code == "INSUFFICIENT_FUNDS"
+    else:
+        raise AssertionError("expected insufficient funds error")
+
+
 def test_owned_property_landing_prompts_for_toll_before_acquisition(monkeypatch):
     state = make_state()
     tile = TILE_MAP[4]
@@ -477,6 +508,41 @@ def test_bankruptcy_during_toll_payment_ends_game_immediately(monkeypatch):
     assert state.phase == "GAME_OVER"
     assert state.winner_id == 1
     assert state.require_player(2).player_state == PlayerState.BANKRUPT
+
+
+def test_exact_toll_payment_also_causes_bankruptcy(monkeypatch):
+    state = make_state()
+    tile = TILE_MAP[4]
+    state.tile(4).owner_id = 1
+    state.require_player(1).owned_tiles = [4]
+    state.require_player(1).building_levels = {4: 0}
+    state.current_player_id = 2
+    state.require_player(2).balance = tile.tolls[0]
+    dice_values = iter([2, 2])
+
+    monkeypatch.setattr(
+        "app.game.actions.roll_dice.random.randint",
+        lambda _start, _end: next(dice_values),
+    )
+
+    _events, patches = process_roll_dice(state, 2)
+    apply_patches(state, patches)
+
+    prompt = state.pending_prompt
+    assert prompt is not None
+    assert prompt.type == "PAY_TOLL"
+
+    prompt_events, prompt_patches = process_prompt_response(
+        state,
+        player_id=2,
+        prompt_id=prompt.prompt_id,
+        choice="PAY_TOLL",
+    )
+    apply_patches(state, prompt_patches)
+
+    assert any(event["type"] == "PLAYER_STATE_CHANGED" for event in prompt_events)
+    assert state.require_player(2).player_state == PlayerState.BANKRUPT
+    assert state.require_player(2).balance == 0
 
 
 def test_sell_property_action_refunds_money_and_releases_tile():

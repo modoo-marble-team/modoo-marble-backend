@@ -10,6 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TypeAlias
 
+from app.game.board import TILE_MAP
 from app.game.enums import ServerEventType, TileType
 from app.game.errors import GameActionError
 from app.game.models import GameState
@@ -33,6 +34,18 @@ class PropertyActionContext:
     ]
 
 
+def _ensure_positive_balance_after_spend(
+    balance: int,
+    cost: int,
+    *,
+    message: str = "보유 금액이 부족합니다.",
+) -> None:
+    # 이 게임에서는 잔액이 0 이하가 되면 더 진행할 수 없다.
+    # 그래서 자발적 소비 액션은 결제 후 1원 이상 남아야 허용한다.
+    if balance <= cost:
+        raise GameActionError(code="INSUFFICIENT_FUNDS", message=message)
+
+
 def apply_property_acquisition(
     state: GameState,
     *,
@@ -42,13 +55,7 @@ def apply_property_acquisition(
 ) -> ActionResult:
     # 다른 플레이어 땅을 인수한다.
     tile_def = state.tile(tile_id)
-    board_tile = None
-    try:
-        from app.game.board import TILE_MAP
-
-        board_tile = TILE_MAP.get(tile_id)
-    except Exception:
-        board_tile = None
+    board_tile = TILE_MAP.get(tile_id)
     if (
         board_tile is None
         or tile_def is None
@@ -62,10 +69,11 @@ def apply_property_acquisition(
 
     player = state.require_player(player_id)
     acquisition_cost = context.get_acquisition_cost(tile_id, tile_def.building_level)
-    if player.balance < acquisition_cost:
-        raise GameActionError(
-            code="INSUFFICIENT_FUNDS", message="인수 금액이 부족합니다."
-        )
+    _ensure_positive_balance_after_spend(
+        player.balance,
+        acquisition_cost,
+        message="인수 금액이 부족합니다.",
+    )
 
     patches = [
         op_inc(f"players.{player_id}.balance", -acquisition_cost),
@@ -101,7 +109,6 @@ def apply_purchase(
 ) -> ActionResult:
     # 빈 땅을 처음 구매한다.
     tile_state = state.tile(tile_id)
-    from app.game.board import TILE_MAP
 
     tile_def = TILE_MAP.get(tile_id)
     if (
@@ -116,10 +123,7 @@ def apply_purchase(
         )
 
     player = state.require_player(player_id)
-    if player.balance < tile_def.price:
-        raise GameActionError(
-            code="INSUFFICIENT_FUNDS", message="보유 금액이 부족합니다."
-        )
+    _ensure_positive_balance_after_spend(player.balance, tile_def.price)
 
     patches = [
         op_inc(f"players.{player_id}.balance", -tile_def.price),
@@ -148,7 +152,6 @@ def apply_build(
 ) -> ActionResult:
     # 이미 가진 땅에 건물을 한 단계 올린다.
     tile_state = state.tile(tile_id)
-    from app.game.board import TILE_MAP
 
     tile_def = TILE_MAP.get(tile_id)
     if (
@@ -167,10 +170,7 @@ def apply_build(
 
     build_cost = tile_def.build_costs[current_level]
     player = state.require_player(player_id)
-    if player.balance < build_cost:
-        raise GameActionError(
-            code="INSUFFICIENT_FUNDS", message="보유 금액이 부족합니다."
-        )
+    _ensure_positive_balance_after_spend(player.balance, build_cost)
 
     next_level = current_level + 1
     events = [
@@ -199,7 +199,6 @@ def apply_toll_payment(
 ) -> ActionResult:
     # 남의 땅에 도착했을 때 통행료를 낸다.
     tile_state = state.tile(tile_id)
-    from app.game.board import TILE_MAP
 
     tile_def = TILE_MAP.get(tile_id)
     if (
@@ -233,7 +232,7 @@ def apply_toll_payment(
     patches: list[dict] = []
     if payable_amount > 0:
         patches.append(op_inc(f"players.{owner_id}.balance", payable_amount))
-    if player.balance >= toll:
+    if player.balance > toll:
         patches.append(op_inc(f"players.{player_id}.balance", -toll))
         return events, patches
 
@@ -253,7 +252,6 @@ def apply_sell_property(
 ) -> ActionResult:
     # 땅을 팔고 소유권과 건물 상태를 정리한다.
     tile_state = state.tile(tile_id)
-    from app.game.board import TILE_MAP
 
     tile_def = TILE_MAP.get(tile_id)
     if (
