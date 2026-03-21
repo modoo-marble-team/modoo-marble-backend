@@ -565,7 +565,7 @@ def register_game_handlers(
                 sid=sid,
                 game_id=str(game_id),
                 code="NOT_GAME_MEMBER",
-                message="??? ?????? ??????.",
+                message="게임 참가자가 아닙니다.",
             )
             return
         except GameActionError as exc:
