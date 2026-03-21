@@ -394,7 +394,7 @@ def register_game_handlers(
                     action_id=action_id,
                     action_type=action_type,
                     code="GAME_NOT_FOUND",
-                    message="???????? ????????.",
+                    message="게임을 찾을 수 없습니다.",
                     revision=-1,
                 ),
                 to=sid,
