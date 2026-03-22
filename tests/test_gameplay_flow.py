@@ -979,6 +979,25 @@ def test_chance_card_gain_money_increases_balance(monkeypatch):
     assert any(event["type"] == "CHANCE_RESOLVED" for event in events)
 
 
+def test_chance_card_description_template_replaces_value_alias(monkeypatch):
+    state = make_state()
+    state.require_player(1).current_tile_id = 3
+
+    monkeypatch.setattr(
+        "app.game.rules.random.choice",
+        lambda _pool: {
+            "type": "GAIN_MONEY",
+            "amount": 30000,
+            "description": "보상 $value$ 지급",
+        },
+    )
+
+    events, _patches = resolve_landing(state, 1, 3)
+
+    chance_event = next(event for event in events if event["type"] == "CHANCE_RESOLVED")
+    assert chance_event["chance"]["description"] == "보상 30000 지급"
+
+
 def test_chance_card_lose_money_decreases_balance(monkeypatch):
     state = make_state()
     state.require_player(1).current_tile_id = 3
@@ -1186,6 +1205,80 @@ def test_extra_turn_card_grants_bonus_turn_after_double_chain(monkeypatch):
     assert third_end_events[0]["nextPlayerId"] == 2
     assert state.require_player(1).extra_turn_effect_turns_remaining == 1
     assert state.require_player(1).extra_turn_effect_active is False
+
+
+def test_steal_property_card_selects_from_all_opponent_owned_tiles(monkeypatch):
+    state = make_state()
+    state.require_player(1).current_tile_id = 3
+    state.players[3] = PlayerGameState(
+        player_id=3,
+        nickname="guest-2",
+        balance=INITIAL_BALANCE,
+        current_tile_id=0,
+        player_state=PlayerState.NORMAL,
+        state_duration=0,
+        consecutive_doubles=0,
+        owned_tiles=[6],
+        building_levels={6: 3},
+        turn_order=2,
+    )
+
+    state.require_player(2).owned_tiles = [4, 5]
+    state.require_player(2).building_levels = {4: 1, 5: 2}
+    state.tiles[4].owner_id = 2
+    state.tiles[4].building_level = 1
+    state.tiles[5].owner_id = 2
+    state.tiles[5].building_level = 2
+    state.tiles[6].owner_id = 3
+    state.tiles[6].building_level = 3
+
+    def choose(pool):
+        first = pool[0]
+        if isinstance(first, dict):
+            return {
+                "type": "STEAL_PROPERTY",
+                "amount": 0,
+                "description": "$player$의 $property$$suffix$ 점유했습니다.",
+            }
+        return pool[1] if len(pool) > 1 else pool[0]
+
+    monkeypatch.setattr("app.game.rules.random.choice", choose)
+
+    events, patches = resolve_landing(state, 1, 3)
+    apply_patches(state, patches)
+
+    chance_event = next(event for event in events if event["type"] == "CHANCE_RESOLVED")
+
+    assert chance_event["tileId"] == 3
+    assert chance_event["chance"]["tileId"] == 5
+    assert chance_event["chance"]["fromPlayerId"] == 2
+    assert chance_event["chance"]["description"] == "guest의 태백을 점유했습니다."
+    assert state.require_player(1).owned_tiles == [5]
+    assert state.require_player(2).owned_tiles == [4]
+    assert state.require_player(3).owned_tiles == [6]
+    assert state.tiles[5].owner_id == 1
+    assert state.tiles[5].building_level == 0
+
+
+def test_steal_property_card_uses_failed_description_when_no_target_exists(monkeypatch):
+    state = make_state()
+    state.require_player(1).current_tile_id = 3
+
+    monkeypatch.setattr(
+        "app.game.rules.random.choice",
+        lambda _pool: {
+            "type": "STEAL_PROPERTY",
+            "amount": 0,
+            "description": "$player$의 $property$$suffix$ 점유했습니다.",
+            "failed_description": "땅 훔치기 실패",
+        },
+    )
+
+    events, _patches = resolve_landing(state, 1, 3)
+
+    chance_event = next(event for event in events if event["type"] == "CHANCE_RESOLVED")
+    assert chance_event["tileId"] == 3
+    assert chance_event["chance"]["description"] == "땅 훔치기 실패"
 
 
 def test_chance_move_card_resolves_before_move_and_chains_into_property_prompt(

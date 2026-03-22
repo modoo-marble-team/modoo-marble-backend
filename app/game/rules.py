@@ -195,6 +195,11 @@ def _player_name(state: GameState, player_id: int) -> str:
     return player.nickname if player else f"Player {player_id}"
 
 
+def _tile_name(tile_id: int) -> str:
+    tile = TILE_MAP.get(tile_id)
+    return tile.name if tile else f"Tile {tile_id}"
+
+
 def _make_prompt(
     *,
     prompt_type: str,
@@ -589,6 +594,9 @@ def _build_card_effect_context() -> CardEffectContext:
             amount=amount,
         ),
         choose_random=lambda items: random.choice(items),
+        player_name=_player_name,
+        tile_name=_tile_name,
+        get_object_particle=get_object_particle,
     )
 
 

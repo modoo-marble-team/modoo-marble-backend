@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, TypeAlias
 
+from app.game.domain.card_descriptions import render_card_text
 from app.game.domain.ruleset import TileDefinition
 from app.game.enums import PlayerState, ServerEventType, TileType
 from app.game.game_rules import ISLAND_LOCK_TURNS
@@ -21,13 +22,40 @@ def _build_card_resolution_payload(card: dict[str, Any]) -> dict[str, Any]:
     payload = {
         "type": card["type"],
         "power": card.get("amount", 0),
-        "description": card["description"],
+        "description": render_card_text(card),
     }
     for key, value in card.items():
-        if key in {"type", "amount", "description"}:
+        if key in {"type", "amount", "description", "failed_description"}:
             continue
         payload[key] = value
     return payload
+
+
+def _attach_card_resolution_event_metadata(
+    events: list[dict],
+    *,
+    card: dict[str, Any],
+    tile_id: int,
+) -> bool:
+    card_payload = _build_card_resolution_payload(card)
+    found = False
+
+    for event in events:
+        if event.get("type") != ServerEventType.CHANCE_RESOLVED:
+            continue
+
+        found = True
+        event.setdefault("tileId", tile_id)
+
+        chance_payload = event.get("chance")
+        if not isinstance(chance_payload, dict):
+            chance_payload = {}
+            event["chance"] = chance_payload
+
+        for key, value in card_payload.items():
+            chance_payload.setdefault(key, value)
+
+    return found
 
 
 @dataclass(frozen=True, slots=True)
@@ -318,15 +346,21 @@ class EventTile(BaseTile):
         card = context.choose_random(context.event_cards)
         card_events, card_patches = context.apply_card(state, player_id, card)
         patches.extend(card_patches)
-        events.extend(card_events)
-        events.append(
-            {
-                "type": ServerEventType.CHANCE_RESOLVED,
-                "playerId": player_id,
-                "tileId": self.definition.tile_id,
-                "chance": _build_card_resolution_payload(card),
-            }
+        has_card_resolution = _attach_card_resolution_event_metadata(
+            card_events,
+            card=card,
+            tile_id=self.definition.tile_id,
         )
+        events.extend(card_events)
+        if not has_card_resolution:
+            events.append(
+                {
+                    "type": ServerEventType.CHANCE_RESOLVED,
+                    "playerId": player_id,
+                    "tileId": self.definition.tile_id,
+                    "chance": _build_card_resolution_payload(card),
+                }
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -344,6 +378,11 @@ class ChanceTile(BaseTile):
         del tile_state
         card = context.choose_random(context.chance_cards)
         card_events, card_patches = context.apply_card(state, player_id, card)
+        has_card_resolution = _attach_card_resolution_event_metadata(
+            card_events,
+            card=card,
+            tile_id=self.definition.tile_id,
+        )
         chance_event = {
             "type": ServerEventType.CHANCE_RESOLVED,
             "playerId": player_id,
@@ -373,10 +412,7 @@ class ChanceTile(BaseTile):
 
         patches.extend(card_patches)
         events.extend(card_events)
-        if not any(
-            event.get("type") == ServerEventType.CHANCE_RESOLVED
-            for event in card_events
-        ):
+        if not has_card_resolution:
             events.append(chance_event)
 
 
