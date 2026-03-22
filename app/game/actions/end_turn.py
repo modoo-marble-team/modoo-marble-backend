@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.game.enums import ServerEventType
 from app.game.errors import GameActionError
+from app.game.game_rules import MAX_ROUNDS
 from app.game.models import GameState
 from app.game.patch import op_set
 from app.game.rules import (
@@ -11,8 +12,6 @@ from app.game.rules import (
     PHASE_WAIT_ROLL,
     find_winner_by_assets,
 )
-
-MAX_ROUNDS = 20
 
 
 def get_next_player_id(state: GameState, current_player_id: int) -> int:

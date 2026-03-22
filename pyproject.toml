@@ -38,6 +38,10 @@ dev = [
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+filterwarnings = [
+  "ignore:`pk` is deprecated, please use `primary_key` instead:DeprecationWarning:tortoise\\.fields\\.data",
+  "ignore:`index` is deprecated, please use `db_index` instead:DeprecationWarning:tortoise\\.fields\\.relational",
+]
 
 [tool.ruff]
 line-length = 88
