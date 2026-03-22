@@ -1238,7 +1238,7 @@ def test_steal_property_card_selects_from_all_opponent_owned_tiles(monkeypatch):
             return {
                 "type": "STEAL_PROPERTY",
                 "amount": 0,
-                "description": "상대의 땅 하나를 가져옵니다.",
+                "description": "$player$의 $property$$suffix$ 점유했습니다.",
             }
         return pool[1] if len(pool) > 1 else pool[0]
 

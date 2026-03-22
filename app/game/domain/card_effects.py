@@ -167,8 +167,7 @@ class StealPropertyCardEffect(BaseCardEffect):
         owned_tiles = [
             (candidate_id, tile_id)
             for candidate_id, candidate in state.players.items()
-            if candidate_id != player_id
-            and not candidate.is_bankrupt
+            if candidate_id != player_id and not candidate.is_bankrupt
             for tile_id in candidate.owned_tiles
         ]
         if not owned_tiles:
