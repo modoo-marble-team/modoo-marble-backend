@@ -233,6 +233,8 @@ def _bankrupt_player_patches(state: GameState, player_id: int) -> list[dict]:
         op_set(f"players.{player_id}.player_state", PlayerState.BANKRUPT),
         op_set(f"players.{player_id}.state_duration", 0),
         op_set(f"players.{player_id}.consecutive_doubles", 0),
+        op_set(f"players.{player_id}.extra_turn_effect_turns_remaining", 0),
+        op_set(f"players.{player_id}.extra_turn_effect_active", False),
         op_set(f"players.{player_id}.owned_tiles", []),
         op_set(f"players.{player_id}.building_levels", {}),
     ]
@@ -309,10 +311,36 @@ def _apply_money_delta(
     return patches, events
 
 
-def _get_toll_amount(tile_id: int, building_level: int) -> int:
+def _get_global_multiplier(state: GameState, effect_name: str) -> float:
+    turns_remaining = getattr(state.global_effects, f"{effect_name}_turns_remaining")
+    if turns_remaining <= 0:
+        return 1.0
+    return float(getattr(state.global_effects, f"{effect_name}_value"))
+
+
+def _get_toll_amount(state: GameState, tile_id: int, building_level: int) -> int:
     tile_def = TILE_MAP[tile_id]
     normalized_level = max(0, min(building_level, len(tile_def.tolls) - 1))
-    return tile_def.tolls[normalized_level]
+    return _apply_price_multiplier(
+        tile_def.tolls[normalized_level],
+        _get_global_multiplier(state, "toll_multiplier"),
+    )
+
+
+def _get_purchase_cost(state: GameState, tile_id: int) -> int:
+    return _apply_price_multiplier(
+        TILE_MAP[tile_id].price,
+        _get_global_multiplier(state, "price_multiplier"),
+    )
+
+
+def _get_build_cost(state: GameState, tile_id: int, building_level: int) -> int:
+    tile_def = TILE_MAP[tile_id]
+    normalized_level = max(0, min(building_level, len(tile_def.build_costs) - 1))
+    return _apply_price_multiplier(
+        tile_def.build_costs[normalized_level],
+        _get_global_multiplier(state, "price_multiplier"),
+    )
 
 
 def _get_sell_refund(tile_id: int, building_level: int) -> int:
@@ -344,7 +372,12 @@ def _get_property_asset_value(tile_id: int, building_level: int) -> int:
     return tile_def.price + invested_build_cost
 
 
-def _get_acquisition_cost(tile_id: int, building_level: int) -> int:
+def _get_acquisition_cost(
+    state: GameState,
+    tile_id: int,
+    building_level: int,
+) -> int:
+    del state
     return _apply_price_multiplier(
         _get_property_asset_value(tile_id, building_level),
         ACQUISITION_PRICE_MULTIPLIER,
@@ -476,6 +509,8 @@ def _build_landing_context() -> LandingContext:
         get_object_particle=get_object_particle,
         format_money=_format_money,
         get_build_stage_name=_get_build_stage_name,
+        get_purchase_cost=_get_purchase_cost,
+        get_build_cost=_get_build_cost,
         get_toll_amount=_get_toll_amount,
         get_acquisition_cost=_get_acquisition_cost,
         player_name=_player_name,
@@ -561,6 +596,8 @@ def _build_property_action_context() -> PropertyActionContext:
     return PropertyActionContext(
         max_building_level=MAX_BUILDING_LEVEL,
         get_sell_refund=_get_sell_refund,
+        get_purchase_cost=_get_purchase_cost,
+        get_build_cost=_get_build_cost,
         get_acquisition_cost=_get_acquisition_cost,
         get_toll_amount=_get_toll_amount,
         owned_tile_patches=_owned_tile_patches,

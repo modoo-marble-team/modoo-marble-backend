@@ -24,8 +24,10 @@ class PropertyActionContext:
     # 땅 액션 계산에 필요한 공통 함수 묶음.
     max_building_level: int
     get_sell_refund: Callable[[int, int], int]
-    get_acquisition_cost: Callable[[int, int], int]
-    get_toll_amount: Callable[[int, int], int]
+    get_purchase_cost: Callable[[GameState, int], int]
+    get_build_cost: Callable[[GameState, int, int], int]
+    get_acquisition_cost: Callable[[GameState, int, int], int]
+    get_toll_amount: Callable[[GameState, int, int], int]
     owned_tile_patches: Callable[[GameState, int, int], list[dict]]
     bankrupt_player_patches: Callable[[GameState, int], list[dict]]
     bankrupt_player_events: Callable[[int], list[dict]]
@@ -68,7 +70,9 @@ def apply_property_acquisition(
         raise GameActionError(code="INVALID_PHASE", message="인수 대상 땅이 없습니다.")
 
     player = state.require_player(player_id)
-    acquisition_cost = context.get_acquisition_cost(tile_id, tile_def.building_level)
+    acquisition_cost = context.get_acquisition_cost(
+        state, tile_id, tile_def.building_level
+    )
     _ensure_positive_balance_after_spend(
         player.balance,
         acquisition_cost,
@@ -123,10 +127,11 @@ def apply_purchase(
         )
 
     player = state.require_player(player_id)
-    _ensure_positive_balance_after_spend(player.balance, tile_def.price)
+    purchase_cost = context.get_purchase_cost(state, tile_id)
+    _ensure_positive_balance_after_spend(player.balance, purchase_cost)
 
     patches = [
-        op_inc(f"players.{player_id}.balance", -tile_def.price),
+        op_inc(f"players.{player_id}.balance", -purchase_cost),
         op_set(f"tiles.{tile_id}.owner_id", player_id),
         op_set(f"tiles.{tile_id}.building_level", 0),
         op_set(f"players.{player_id}.building_levels.{tile_id}", 0),
@@ -137,7 +142,7 @@ def apply_purchase(
             "type": ServerEventType.BOUGHT_PROPERTY,
             "playerId": player_id,
             "tileId": tile_id,
-            "amount": tile_def.price,
+            "amount": purchase_cost,
         }
     ]
     return events, patches
@@ -168,7 +173,7 @@ def apply_build(
             code="INVALID_PHASE", message="이미 최대 단계까지 건설된 타일입니다."
         )
 
-    build_cost = tile_def.build_costs[current_level]
+    build_cost = context.get_build_cost(state, tile_id, current_level)
     player = state.require_player(player_id)
     _ensure_positive_balance_after_spend(player.balance, build_cost)
 
@@ -217,7 +222,7 @@ def apply_toll_payment(
         )
 
     building_level = tile_state.building_level
-    toll = context.get_toll_amount(tile_id, building_level)
+    toll = context.get_toll_amount(state, tile_id, building_level)
     player = state.require_player(player_id)
     payable_amount = min(player.balance, toll)
     events = [
