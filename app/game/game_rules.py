@@ -14,6 +14,7 @@ START_SALARY = RULESET.start_salary
 MAX_ROUNDS = RULESET.max_rounds
 MAX_BUILDING_LEVEL = RULESET.max_building_level
 ISLAND_TILE_ID = RULESET.island_tile_id
+ISLAND_LOCK_TURNS = 2
 PROMPT_TIMEOUT_SECONDS = RULESET.prompt_timeout_seconds
 TURN_TIMEOUT_SECONDS = RULESET.turn_timeout_seconds
 BUILDING_STAGE_LABELS = dict(RULESET.building_stage_labels)

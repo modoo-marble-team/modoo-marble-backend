@@ -136,3 +136,36 @@ def test_ruleset_requires_property_tier_when_property_values_are_missing():
         assert "Missing property tier config" in str(exc)
     else:
         raise AssertionError("Expected ValueError for missing property tier config")
+
+
+def test_ruleset_preserves_card_payload_fields():
+    ruleset = RuleSet.from_dict(
+        {
+            "version": "test.v1",
+            "initial_balance": 500000,
+            "start_salary": 70000,
+            "max_rounds": 20,
+            "max_building_level": 3,
+            "island_tile_id": 8,
+            "prompt_timeout_seconds": 30,
+            "turn_timeout_seconds": 30,
+            "building_stage_labels": {"1": "별장", "2": "호텔", "3": "랜드마크"},
+            "property_tiers": {},
+            "board": [],
+            "chance_cards": [
+                {
+                    "type": "TOLL_MULTIPLIER",
+                    "duration": 3,
+                    "multiplier": 2,
+                    "description": "올림픽",
+                }
+            ],
+            "event_cards": [],
+        }
+    )
+
+    card = ruleset.chance_cards[0].to_dict()
+
+    assert card["type"] == "TOLL_MULTIPLIER"
+    assert card["duration"] == 3
+    assert card["multiplier"] == 2
