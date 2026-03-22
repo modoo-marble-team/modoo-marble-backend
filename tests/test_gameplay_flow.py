@@ -1008,6 +1008,7 @@ def test_toll_multiplier_card_applies_global_toll_boost_and_ticks_down(monkeypat
         "app.game.rules.random.choice",
         lambda _pool: {
             "type": "TOLL_MULTIPLIER",
+            "effect": "FESTIVAL",
             "duration": 3,
             "multiplier": 2,
             "description": "olympics",
@@ -1019,11 +1020,11 @@ def test_toll_multiplier_card_applies_global_toll_boost_and_ticks_down(monkeypat
 
     assert state.global_effects.toll_multiplier_turns_remaining == 3
     assert state.global_effects.toll_multiplier_value == 2
-    assert any(
-        event["type"] == "CHANCE_RESOLVED"
-        and event["chance"]["type"] == "TOLL_MULTIPLIER"
-        for event in events
-    )
+    chance_event = next(event for event in events if event["type"] == "CHANCE_RESOLVED")
+    assert chance_event["chance"]["type"] == "TOLL_MULTIPLIER"
+    assert chance_event["chance"]["effect"] == "FESTIVAL"
+    assert chance_event["chance"]["duration"] == 3
+    assert chance_event["chance"]["multiplier"] == 2
 
     toll_events, toll_patches = resolve_landing(state, 2, 1)
     apply_patches(state, toll_patches)
@@ -1063,6 +1064,29 @@ def test_toll_multiplier_card_overwrites_existing_global_effect(monkeypatch):
 
     assert state.global_effects.toll_multiplier_turns_remaining == 3
     assert state.global_effects.toll_multiplier_value == 0.5
+
+
+def test_toll_multiplier_card_emits_effect_and_duration_for_pandemic(monkeypatch):
+    state = make_state()
+    state.require_player(2).current_tile_id = 3
+
+    monkeypatch.setattr(
+        "app.game.rules.random.choice",
+        lambda _pool: {
+            "type": "TOLL_MULTIPLIER",
+            "effect": "PANDEMIC",
+            "duration": 3,
+            "multiplier": 0.5,
+            "description": "pandemic",
+        },
+    )
+
+    events, _patches = resolve_landing(state, 2, 3)
+
+    chance_event = next(event for event in events if event["type"] == "CHANCE_RESOLVED")
+    assert chance_event["chance"]["effect"] == "PANDEMIC"
+    assert chance_event["chance"]["duration"] == 3
+    assert chance_event["chance"]["multiplier"] == 0.5
 
 
 def test_toll_multiplier_can_reduce_toll_prompt_amount():

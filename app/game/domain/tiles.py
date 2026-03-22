@@ -17,6 +17,19 @@ from app.game.state import apply_patches
 ActionResult: TypeAlias = tuple[list[dict], list[dict]]
 
 
+def _build_card_resolution_payload(card: dict[str, Any]) -> dict[str, Any]:
+    payload = {
+        "type": card["type"],
+        "power": card.get("amount", 0),
+        "description": card["description"],
+    }
+    for key, value in card.items():
+        if key in {"type", "amount", "description"}:
+            continue
+        payload[key] = value
+    return payload
+
+
 @dataclass(frozen=True, slots=True)
 class LandingContext:
     phase_wait_prompt: str
@@ -311,11 +324,7 @@ class EventTile(BaseTile):
                 "type": ServerEventType.CHANCE_RESOLVED,
                 "playerId": player_id,
                 "tileId": self.definition.tile_id,
-                "chance": {
-                    "type": card["type"],
-                    "power": card.get("amount", 0),
-                    "description": card["description"],
-                },
+                "chance": _build_card_resolution_payload(card),
             }
         )
 
@@ -339,11 +348,7 @@ class ChanceTile(BaseTile):
             "type": ServerEventType.CHANCE_RESOLVED,
             "playerId": player_id,
             "tileId": self.definition.tile_id,
-            "chance": {
-                "type": card["type"],
-                "power": card.get("amount", 0),
-                "description": card["description"],
-            },
+            "chance": _build_card_resolution_payload(card),
         }
 
         if card["type"] in {"MOVE_FORWARD", "MOVE_BACKWARD"}:
