@@ -26,6 +26,7 @@ class ActionType(StrEnum):
     CITY_BUILD = "CITY_BUILD"
     SELL_PROPERTY = "SELL_PROPERTY"
     END_TURN = "END_TURN"
+    TRAVEL = "TRAVEL"
 
 
 class ServerEventType(StrEnum):

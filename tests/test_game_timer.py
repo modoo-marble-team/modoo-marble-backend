@@ -9,6 +9,7 @@ from app.game.models import (
     PromptChoice,
     TileGameState,
 )
+from app.game.state import INITIAL_BALANCE
 from app.game.timer import process_turn_timeout
 
 
@@ -28,7 +29,7 @@ def make_state() -> GameState:
             1: PlayerGameState(
                 player_id=1,
                 nickname="host",
-                balance=5000,
+                balance=INITIAL_BALANCE,
                 current_tile_id=0,
                 player_state=PlayerState.NORMAL,
                 state_duration=0,
@@ -40,7 +41,7 @@ def make_state() -> GameState:
             2: PlayerGameState(
                 player_id=2,
                 nickname="guest",
-                balance=5000,
+                balance=INITIAL_BALANCE,
                 current_tile_id=0,
                 player_state=PlayerState.NORMAL,
                 state_duration=0,
@@ -60,7 +61,7 @@ def make_state() -> GameState:
 
 def test_turn_timeout_auto_rolls_and_skips_optional_actions(monkeypatch):
     state = make_state()
-    dice_values = iter([2, 2])
+    dice_values = iter([1, 3])
 
     monkeypatch.setattr(
         "app.game.actions.roll_dice.random.randint",
@@ -89,7 +90,7 @@ def test_turn_timeout_pays_toll_and_skips_acquisition(monkeypatch):
     state.tile(4).building_level = 2
     state.require_player(1).owned_tiles = [4]
     state.require_player(1).building_levels = {4: 2}
-    dice_values = iter([2, 2])
+    dice_values = iter([1, 3])
 
     monkeypatch.setattr(
         "app.game.actions.roll_dice.random.randint",

@@ -14,6 +14,7 @@ from app.game.models import (
     TileGameState,
 )
 from app.game.socket_handlers import register_game_handlers
+from app.game.state import INITIAL_BALANCE
 from app.game.sync_runtime import GameSyncRuntime
 
 
@@ -93,7 +94,7 @@ def make_state() -> GameState:
             1: PlayerGameState(
                 player_id=1,
                 nickname="host",
-                balance=5000,
+                balance=INITIAL_BALANCE,
                 current_tile_id=0,
                 player_state=PlayerState.NORMAL,
                 state_duration=0,
@@ -105,7 +106,7 @@ def make_state() -> GameState:
             2: PlayerGameState(
                 player_id=2,
                 nickname="guest",
-                balance=5000,
+                balance=INITIAL_BALANCE,
                 current_tile_id=0,
                 player_state=PlayerState.NORMAL,
                 state_duration=0,
@@ -294,7 +295,7 @@ async def test_game_action_joins_game_room_before_broadcast(monkeypatch):
         "app.game.socket_handlers.save_game_state", fake_save_game_state
     )
     monkeypatch.setattr(
-        "app.game.socket_handlers.process_roll_dice", fake_process_roll_dice
+        "app.game.actions.dispatch.process_roll_dice", fake_process_roll_dice
     )
     monkeypatch.setattr(
         "app.game.socket_handlers.start_turn_timer", lambda *_args: None
@@ -497,7 +498,7 @@ async def test_sell_property_action_keeps_turn_open(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_city_build_action_upgrades_tile_without_ending_turn(monkeypatch):
+async def test_city_build_action_is_rejected(monkeypatch):
     sio = FakeSio()
     runtime = FakeRuntime()
     state = make_state()
@@ -544,16 +545,13 @@ async def test_city_build_action_upgrades_tile_without_ending_turn(monkeypatch):
 
     assert state.current_player_id == 1
     assert state.phase == "WAIT_ROLL"
-    assert state.tile(4).building_level == 1
-    assert state.require_player(1).building_levels == {4: 1}
-    assert not any(
-        item["event"] == "game:patch"
-        and any(event["type"] == "TURN_ENDED" for event in item["data"]["events"])
-        for item in sio.emitted
-    )
+    assert state.tile(4).building_level == 0
+    assert state.require_player(1).building_levels == {4: 0}
+    assert not any(item["event"] == "game:patch" for item in sio.emitted)
     assert any(
         item["event"] == "game:ack"
-        and item["data"]["ok"] is True
+        and item["data"]["ok"] is False
         and item["data"]["type"] == "CITY_BUILD"
+        and item["data"]["error"]["code"] == "INVALID_PHASE"
         for item in sio.emitted
     )

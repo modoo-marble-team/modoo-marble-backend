@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from app.game.enums import PlayerState
 from app.game.models import GameState, PlayerGameState
+from app.game.state import INITIAL_BALANCE
 from app.routers import lobby
 
 
@@ -32,7 +33,7 @@ def make_game_state() -> GameState:
             1: PlayerGameState(
                 player_id=1,
                 nickname="host",
-                balance=5000,
+                balance=INITIAL_BALANCE,
                 current_tile_id=0,
                 player_state=PlayerState.NORMAL,
                 state_duration=0,
@@ -44,7 +45,7 @@ def make_game_state() -> GameState:
             2: PlayerGameState(
                 player_id=2,
                 nickname="guest",
-                balance=5000,
+                balance=INITIAL_BALANCE,
                 current_tile_id=0,
                 player_state=PlayerState.NORMAL,
                 state_duration=0,
@@ -109,3 +110,35 @@ def test_start_room_game_accepts_object_game_state(monkeypatch):
         item["event"] == "game_start" and item["room"] == "user:2"
         for item in sio.emitted
     )
+
+
+def test_leave_room_routes_playing_room_to_immediate_game_leave(monkeypatch):
+    sio = FakeSio()
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(sio=sio)))
+    auth = SimpleNamespace(user_id=1)
+    room = {
+        "id": "room-1",
+        "status": "playing",
+        "game_id": "game-1",
+        "players": [
+            {"id": "1", "nickname": "host", "is_host": True, "is_ready": False},
+            {"id": "2", "nickname": "guest", "is_host": False, "is_ready": False},
+        ],
+    }
+
+    async def fake_get_room(room_id: str) -> dict | None:
+        assert room_id == "room-1"
+        return room
+
+    async def fake_leave_game_for_user(*, game_id: str, user_id: int) -> bool:
+        assert game_id == "game-1"
+        assert user_id == 1
+        return True
+
+    monkeypatch.setattr(lobby.room_service, "get_room", fake_get_room)
+    monkeypatch.setattr(lobby, "leave_game_for_user", fake_leave_game_for_user)
+
+    result = asyncio.run(lobby.leave_room("room-1", request, auth))
+
+    assert result == {"success": True, "new_host_id": "2"}
+    assert sio.emitted == []

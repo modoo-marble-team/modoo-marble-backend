@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from app.game.enums import PlayerState
 from app.game.models import GameState, PlayerGameState
+from app.game.state import INITIAL_BALANCE
 from app.routers import users
 
 
@@ -32,7 +33,7 @@ def make_game_state() -> GameState:
             1: PlayerGameState(
                 player_id=1,
                 nickname="host",
-                balance=5000,
+                balance=INITIAL_BALANCE,
                 current_tile_id=0,
                 player_state=PlayerState.NORMAL,
                 state_duration=0,

@@ -1,23 +1,28 @@
+"""소켓 이벤트를 받아 게임 서비스와 연결하는 모듈.
+
+핵심 규칙 계산은 다른 계층에 맡기고,
+여기서는 입출력 흐름을 조립하는 역할만 한다.
+"""
+
 from __future__ import annotations
+
+from contextlib import asynccontextmanager
 
 import socketio
 import structlog
 
-from app.game.actions.end_turn import process_end_turn
-from app.game.actions.roll_dice import process_roll_dice
-from app.game.enums import ActionType
-from app.game.errors import GameActionError
-from app.game.models import GameState
-from app.game.rules import (
-    process_buy_property_action,
-    process_city_build_action,
-    process_prompt_response,
-    process_turn_sell_property_action,
-    serialize_prompt,
+from app.game.application import (
+    GameActionService,
+    GameDesyncError,
+    GameMembershipError,
+    GameNotFoundError,
 )
+from app.game.errors import GameActionError
+from app.game.infrastructure.socket_presenter import GameSocketPresenter
+from app.game.infrastructure.state_repository import GameStateRepository
+from app.game.models import GameState
 from app.game.state import (
     LockAcquisitionError,
-    apply_patches,
     game_lock,
     get_game_state,
     save_game_state,
@@ -35,12 +40,44 @@ def register_game_handlers(
     sio: socketio.AsyncServer,
     sid_to_user: dict[str, int],
 ) -> None:
+    # 소켓 서버에 게임 관련 이벤트 핸들러를 등록한다.
     room_service = RoomService()
+    presenter = GameSocketPresenter()
     sync_runtime = init_game_sync_runtime(sio)
 
+    class SocketHandlerRepository(GameStateRepository):
+        # 기존 저장 함수를 현재 서비스 인터페이스에 맞춰 연결하는 어댑터.
+        async def load(self, game_id: str) -> GameState | None:
+            return await get_game_state(game_id)
+
+        async def save(self, game_id: str, state: GameState) -> None:
+            await save_game_state(game_id, state)
+
+        @asynccontextmanager
+        async def lock(self, game_id: str):  # type: ignore[override]
+            async with game_lock(game_id):
+                yield
+
+    action_service = GameActionService(repository=SocketHandlerRepository())
+
+    async def emit_game_error(
+        *,
+        sid: str,
+        code: str,
+        message: str,
+        game_id: str | None = None,
+    ) -> None:
+        """game:error 이벤트를 전송하는 헬퍼 함수."""
+        await sio.emit(
+            "game:error",
+            {"gameId": game_id, "code": code, "message": message},
+            to=sid,
+        )
+
     async def emit_prompt_if_needed(state: GameState) -> None:
+        # 현재 상태에 프롬프트가 있으면 대상 유저에게만 전송한다.
         sync_prompt_timer(game_id=state.game_id, prompt=state.pending_prompt)
-        prompt_payload = serialize_prompt(state.pending_prompt)
+        prompt_payload = presenter.serialize_prompt(state.pending_prompt)
         if not prompt_payload or state.pending_prompt is None:
             return
         await sio.emit(
@@ -56,15 +93,13 @@ def register_game_handlers(
         state: GameState,
         user_id: int,
     ) -> bool:
+        # 요청한 유저가 해당 게임 방 참가자인지 확인한다.
         if user_id not in state.players:
-            await sio.emit(
-                "game:error",
-                {
-                    "gameId": game_id,
-                    "code": "NOT_GAME_MEMBER",
-                    "message": "게임 참가자가 아닙니다.",
-                },
-                to=sid,
+            await emit_game_error(
+                sid=sid,
+                game_id=game_id,
+                code="NOT_GAME_MEMBER",
+                message="게임 참가자가 아닙니다.",
             )
             return False
 
@@ -97,14 +132,11 @@ def register_game_handlers(
         game_id: str | None,
         message: str = "knownRevision 값이 올바르지 않습니다.",
     ) -> None:
-        await sio.emit(
-            "game:error",
-            {
-                "gameId": game_id,
-                "code": "DESYNC",
-                "message": message,
-            },
-            to=sid,
+        await emit_game_error(
+            sid=sid,
+            game_id=game_id,
+            code="DESYNC",
+            message=message,
         )
 
     async def parse_known_revision(
@@ -132,47 +164,27 @@ def register_game_handlers(
             state.turn != previous_turn or state.current_player_id != previous_player_id
         )
 
-    def parse_travel_target(payload: dict) -> int:
-        raw_target = payload.get("targetTileId")
-        if raw_target is None:
-            raw_target = payload.get("toTileId")
-        if raw_target is None:
-            raw_target = payload.get("toIndex")
-        try:
-            return int(raw_target)
-        except (TypeError, ValueError) as exc:
-            raise GameActionError(
-                code="INVALID_TILE",
-                message="여행 목적지를 선택해주세요.",
-            ) from exc
-
     @sio.on("enter_room")
     async def enter_room(sid: str, data: dict) -> None:
         user_id = sid_to_user.get(sid)
         room_id = str(data.get("room_id") or "")
 
         if user_id is None:
-            await sio.emit(
-                "game:error",
-                {"code": "AUTH_REQUIRED", "message": "인증이 필요합니다."},
-                to=sid,
+            await emit_game_error(
+                sid=sid, code="AUTH_REQUIRED", message="인증이 필요합니다."
             )
             return
 
         room = await room_service.get_room(room_id)
         if room is None:
-            await sio.emit(
-                "game:error",
-                {"code": "ROOM_NOT_FOUND", "message": "방을 찾을 수 없습니다."},
-                to=sid,
+            await emit_game_error(
+                sid=sid, code="ROOM_NOT_FOUND", message="방을 찾을 수 없습니다."
             )
             return
 
         if not any(player["id"] == str(user_id) for player in room["players"]):
-            await sio.emit(
-                "game:error",
-                {"code": "NOT_ROOM_MEMBER", "message": "방 멤버가 아닙니다."},
-                to=sid,
+            await emit_game_error(
+                sid=sid, code="NOT_ROOM_MEMBER", message="방 멤버가 아닙니다."
             )
             return
 
@@ -191,10 +203,8 @@ def register_game_handlers(
         message = str(data.get("message") or "").strip()
 
         if user_id is None:
-            await sio.emit(
-                "game:error",
-                {"code": "AUTH_REQUIRED", "message": "인증이 필요합니다."},
-                to=sid,
+            await emit_game_error(
+                sid=sid, code="AUTH_REQUIRED", message="인증이 필요합니다."
             )
             return
 
@@ -219,26 +229,20 @@ def register_game_handlers(
         known_revision_raw = (data or {}).get("knownRevision", -1)
 
         if user_id is None:
-            await sio.emit(
-                "game:error",
-                {
-                    "gameId": game_id or None,
-                    "code": "AUTH_REQUIRED",
-                    "message": "인증이 필요합니다.",
-                },
-                to=sid,
+            await emit_game_error(
+                sid=sid,
+                game_id=game_id or None,
+                code="AUTH_REQUIRED",
+                message="인증이 필요합니다.",
             )
             return
 
         if not game_id:
-            await sio.emit(
-                "game:error",
-                {
-                    "gameId": None,
-                    "code": "INVALID_REQUEST",
-                    "message": "gameId가 필요합니다.",
-                },
-                to=sid,
+            await emit_game_error(
+                sid=sid,
+                game_id=None,
+                code="INVALID_REQUEST",
+                message="gameId가 필요합니다.",
             )
             return
 
@@ -265,39 +269,30 @@ def register_game_handlers(
         game_id = str((data or {}).get("gameId") or "")
 
         if user_id is None:
-            await sio.emit(
-                "game:error",
-                {
-                    "gameId": game_id or None,
-                    "code": "AUTH_REQUIRED",
-                    "message": "인증이 필요합니다.",
-                },
-                to=sid,
+            await emit_game_error(
+                sid=sid,
+                game_id=game_id or None,
+                code="AUTH_REQUIRED",
+                message="인증이 필요합니다.",
             )
             return
 
         if not game_id:
-            await sio.emit(
-                "game:error",
-                {
-                    "gameId": None,
-                    "code": "INVALID_REQUEST",
-                    "message": "gameId가 필요합니다.",
-                },
-                to=sid,
+            await emit_game_error(
+                sid=sid,
+                game_id=None,
+                code="INVALID_REQUEST",
+                message="gameId가 필요합니다.",
             )
             return
 
         state = await get_game_state(game_id)
         if state is None:
-            await sio.emit(
-                "game:error",
-                {
-                    "gameId": game_id,
-                    "code": "GAME_NOT_FOUND",
-                    "message": "게임을 찾을 수 없습니다.",
-                },
-                to=sid,
+            await emit_game_error(
+                sid=sid,
+                game_id=game_id,
+                code="GAME_NOT_FOUND",
+                message="게임을 찾을 수 없습니다.",
             )
             return
 
@@ -323,10 +318,8 @@ def register_game_handlers(
     async def handle_game_action(sid: str, data: dict) -> None:
         user_id = sid_to_user.get(sid)
         if user_id is None:
-            await sio.emit(
-                "game:error",
-                {"code": "AUTH_REQUIRED", "message": "인증이 필요합니다."},
-                to=sid,
+            await emit_game_error(
+                sid=sid, code="AUTH_REQUIRED", message="인증이 필요합니다."
             )
             return
 
@@ -361,144 +354,23 @@ def register_game_handlers(
             return
 
         try:
-            async with game_lock(game_id):
-                state = await get_game_state(game_id)
-                if state is None:
-                    await sio.emit(
-                        "game:ack",
-                        build_error_ack(
-                            game_id=game_id,
-                            action_id=action_id,
-                            action_type=action_type,
-                            code="GAME_NOT_FOUND",
-                            message="게임을 찾을 수 없습니다.",
-                            revision=-1,
-                        ),
-                        to=sid,
-                    )
-                    return
-
-                if client_revision is not None and state.revision != client_revision:
-                    await emit_desync_error(
-                        sid=sid,
-                        game_id=game_id,
-                        message="클라이언트 상태가 서버보다 오래되었습니다.",
-                    )
-                    return
-
-                if not await ensure_game_room_membership(
-                    sid=sid,
-                    game_id=str(game_id),
-                    state=state,
-                    user_id=user_id,
-                ):
-                    return
-
-                previous_turn = state.turn
-                previous_player_id = state.current_player_id
-
-                if action_type == ActionType.ROLL_DICE:
-                    events, patches = process_roll_dice(state, user_id)
-                    apply_patches(state, patches)
-
-                elif action_type == ActionType.BUY_PROPERTY:
-                    payload = (
-                        data.get("payload")
-                        if isinstance(data.get("payload"), dict)
-                        else {}
-                    )
-                    tile_id = int(payload.get("tileId", -1))
-                    events, patches = process_buy_property_action(
-                        state,
-                        player_id=user_id,
-                        tile_id=tile_id,
-                    )
-                    apply_patches(state, patches)
-
-                elif action_type == ActionType.SELL_PROPERTY:
-                    payload = (
-                        data.get("payload")
-                        if isinstance(data.get("payload"), dict)
-                        else {}
-                    )
-                    tile_id = int(payload.get("tileId", -1))
-                    raw_building_level = payload.get("buildingLevel")
-                    building_level = (
-                        int(raw_building_level)
-                        if isinstance(raw_building_level, (int, str))
-                        and str(raw_building_level).strip() != ""
-                        else None
-                    )
-                    events, patches = process_turn_sell_property_action(
-                        state,
-                        player_id=user_id,
-                        tile_id=tile_id,
-                        building_level=building_level,
-                    )
-                    apply_patches(state, patches)
-
-                elif action_type == ActionType.CITY_BUILD:
-                    payload = (
-                        data.get("payload")
-                        if isinstance(data.get("payload"), dict)
-                        else {}
-                    )
-                    tile_id = int(payload.get("tileId", -1))
-                    events, patches = process_city_build_action(
-                        state,
-                        player_id=user_id,
-                        tile_id=tile_id,
-                    )
-                    apply_patches(state, patches)
-
-                elif action_type == ActionType.END_TURN:
-                    events, patches = process_end_turn(state, user_id)
-                    apply_patches(state, patches)
-
-                elif action_type == "TRAVEL":
-                    payload = (
-                        data.get("payload")
-                        if isinstance(data.get("payload"), dict)
-                        else {}
-                    )
-                    pending_prompt = state.pending_prompt
-                    if pending_prompt is None or pending_prompt.type != "TRAVEL_SELECT":
-                        raise GameActionError(
-                            code="INVALID_PHASE",
-                            message="여행지 선택 대기 상태가 아닙니다.",
-                        )
-
-                    target_tile_id = parse_travel_target(payload)
-                    events, patches = process_prompt_response(
-                        state,
-                        player_id=user_id,
-                        prompt_id=pending_prompt.prompt_id,
-                        choice="CONFIRM",
-                        payload={"targetTileId": target_tile_id},
-                    )
-                    apply_patches(state, patches)
-
-                else:
-                    await sio.emit(
-                        "game:ack",
-                        build_error_ack(
-                            game_id=game_id,
-                            action_id=action_id,
-                            action_type=action_type,
-                            code="UNKNOWN_ACTION",
-                            message=f"지원하지 않는 액션입니다: {action_type}",
-                            revision=state.revision,
-                        ),
-                        to=sid,
-                    )
-                    return
-
-                state.revision += 1
-                await save_game_state(game_id, state)
-                await sync_runtime.set_active_game(
-                    user_id=user_id,
-                    game_id=str(game_id),
-                )
+            result = await action_service.execute_action(
+                game_id=str(game_id),
+                user_id=user_id,
+                action_type=action_type,
+                data=data,
+                known_revision=client_revision,
+            )
+            state = result.state
+            events = result.events
+            patches = result.patches
+            previous_turn = result.previous_turn
+            previous_player_id = result.previous_player_id
+            await sio.enter_room(sid, f"game:{game_id}")
+            await sync_runtime.set_active_game(
+                user_id=user_id,
+                game_id=str(game_id),
+            )
 
         except LockAcquisitionError:
             await sio.emit(
@@ -512,6 +384,35 @@ def register_game_handlers(
                     revision=-1,
                 ),
                 to=sid,
+            )
+            return
+        except GameNotFoundError:
+            await sio.emit(
+                "game:ack",
+                build_error_ack(
+                    game_id=game_id,
+                    action_id=action_id,
+                    action_type=action_type,
+                    code="GAME_NOT_FOUND",
+                    message="게임을 찾을 수 없습니다.",
+                    revision=-1,
+                ),
+                to=sid,
+            )
+            return
+        except GameDesyncError:
+            await emit_desync_error(
+                sid=sid,
+                game_id=game_id,
+                message="클라이언트 상태가 서버보다 오래되었습니다.",
+            )
+            return
+        except GameMembershipError:
+            await emit_game_error(
+                sid=sid,
+                game_id=str(game_id),
+                code="NOT_GAME_MEMBER",
+                message="게임 참가자가 아닙니다.",
             )
             return
         except GameActionError as exc:
@@ -564,10 +465,8 @@ def register_game_handlers(
     async def handle_prompt_response(sid: str, data: dict) -> None:
         user_id = sid_to_user.get(sid)
         if user_id is None:
-            await sio.emit(
-                "game:error",
-                {"code": "AUTH_REQUIRED", "message": "인증이 필요합니다."},
-                to=sid,
+            await emit_game_error(
+                sid=sid, code="AUTH_REQUIRED", message="인증이 필요합니다."
             )
             return
 
@@ -605,58 +504,24 @@ def register_game_handlers(
             return
 
         try:
-            async with game_lock(game_id):
-                state = await get_game_state(game_id)
-                if state is None:
-                    await sio.emit(
-                        "game:ack",
-                        build_error_ack(
-                            game_id=game_id,
-                            action_id=action_id,
-                            action_type=PROMPT_RESPONSE_ACK_TYPE,
-                            code="GAME_NOT_FOUND",
-                            message="게임을 찾을 수 없습니다.",
-                            revision=-1,
-                            prompt_id=prompt_id,
-                        ),
-                        to=sid,
-                    )
-                    return
-
-                if client_revision is not None and state.revision != client_revision:
-                    await emit_desync_error(
-                        sid=sid,
-                        game_id=game_id,
-                        message="클라이언트 상태가 서버보다 오래되었습니다.",
-                    )
-                    return
-
-                if not await ensure_game_room_membership(
-                    sid=sid,
-                    game_id=str(game_id),
-                    state=state,
-                    user_id=user_id,
-                ):
-                    return
-
-                previous_turn = state.turn
-                previous_player_id = state.current_player_id
-
-                events, patches = process_prompt_response(
-                    state,
-                    player_id=user_id,
-                    prompt_id=prompt_id,
-                    choice=choice,
-                    payload=payload,
-                )
-                apply_patches(state, patches)
-
-                state.revision += 1
-                await save_game_state(game_id, state)
-                await sync_runtime.set_active_game(
-                    user_id=user_id,
-                    game_id=str(game_id),
-                )
+            result = await action_service.respond_prompt(
+                game_id=str(game_id),
+                user_id=user_id,
+                prompt_id=prompt_id,
+                choice=choice,
+                payload=payload,
+                known_revision=client_revision,
+            )
+            state = result.state
+            events = result.events
+            patches = result.patches
+            previous_turn = result.previous_turn
+            previous_player_id = result.previous_player_id
+            await sio.enter_room(sid, f"game:{game_id}")
+            await sync_runtime.set_active_game(
+                user_id=user_id,
+                game_id=str(game_id),
+            )
 
         except LockAcquisitionError:
             await sio.emit(
@@ -671,6 +536,36 @@ def register_game_handlers(
                     prompt_id=prompt_id,
                 ),
                 to=sid,
+            )
+            return
+        except GameNotFoundError:
+            await sio.emit(
+                "game:ack",
+                build_error_ack(
+                    game_id=game_id,
+                    action_id=action_id,
+                    action_type=PROMPT_RESPONSE_ACK_TYPE,
+                    code="GAME_NOT_FOUND",
+                    message="게임을 찾을 수 없습니다.",
+                    revision=-1,
+                    prompt_id=prompt_id,
+                ),
+                to=sid,
+            )
+            return
+        except GameDesyncError:
+            await emit_desync_error(
+                sid=sid,
+                game_id=game_id,
+                message="클라이언트 상태가 서버보다 오래되었습니다.",
+            )
+            return
+        except GameMembershipError:
+            await emit_game_error(
+                sid=sid,
+                game_id=str(game_id),
+                code="NOT_GAME_MEMBER",
+                message="게임 참가자가 아닙니다.",
             )
             return
         except GameActionError as exc:

@@ -11,6 +11,7 @@ from app.schemas.users import CurrentUserContextResponse, UpdateNicknameRequest
 from app.services.room_service import RoomService
 from app.services.users_service import UsersService
 from app.utils.auth_dep import AuthUser, get_auth_user
+from app.utils.redis_keys import RedisKeys
 
 router = APIRouter(prefix="/users", tags=["Users"])
 users_service = UsersService()
@@ -70,8 +71,8 @@ async def get_me_context(
     room_id = await room_service._get_user_room_id(auth.user_id)
     room = await room_service.get_room(room_id) if room_id else None
 
-    active_game_id = await redis.get(f"game:user:{auth.user_id}:active")
-    legacy_game_id = await redis.get(f"user:{auth.user_id}:game")
+    active_game_id = await redis.get(RedisKeys.user_active_game(auth.user_id))
+    legacy_game_id = await redis.get(RedisKeys.user_game(auth.user_id))
     room_game_id = str(room.get("game_id")) if room and room.get("game_id") else None
     game_id = room_game_id or active_game_id or legacy_game_id
 
