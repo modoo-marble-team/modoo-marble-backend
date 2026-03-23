@@ -22,6 +22,7 @@ async def get_me(auth: AuthUser = Depends(get_auth_user)) -> dict:
 
     try:
         user = await users_service.get_me(user_id=auth.user_id)
+        stats = await users_service.get_stats(user_id=auth.user_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
 
@@ -30,7 +31,7 @@ async def get_me(auth: AuthUser = Depends(get_auth_user)) -> dict:
         "nickname": user.nickname,
         "profile_image_url": user.profile_image_url,
         "is_guest": user.is_guest,
-        "stats": {"total_games": 0, "wins": 0, "losses": 0},
+        "stats": stats,
     }
 
 

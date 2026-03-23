@@ -825,6 +825,9 @@ class GameSyncRuntime:
         return state.active_players()
 
     async def finalize_finished_game(self, state: GameState) -> dict | None:
+        from app.services.game_result_service import persist_game_result
+
+        await persist_game_result(state)
         room_service = RoomService()
         redis = get_redis()
         player_ids = list(state.players)
