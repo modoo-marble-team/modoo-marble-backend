@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import UTC, datetime
 
 from tortoise.exceptions import IntegrityError
 
 from app.models.user import User
+from app.models.user_game import UserGame
 from app.utils.exceptions import (
     InvalidNicknameError,
     NicknameAlreadyExistsError,
@@ -29,6 +31,13 @@ class UsersService:
 
     async def get_me(self, *, user_id: int) -> User:
         return await self._get_active_user_or_raise(user_id)
+
+    async def get_stats(self, *, user_id: int) -> dict:
+        total, wins = await asyncio.gather(
+            UserGame.filter(user_id=user_id, placement__isnull=False).count(),
+            UserGame.filter(user_id=user_id, placement=1).count(),
+        )
+        return {"total_games": total, "wins": wins, "losses": total - wins}
 
     async def update_nickname(self, *, user_id: int, nickname: str) -> str:
         validated_nickname = self._validate_nickname_or_raise(nickname)

@@ -20,6 +20,7 @@ from app.game.state import delete_game_state, game_lock, get_game_state, save_ga
 from app.game.timer import cancel_turn_timer
 from app.presence import update_status
 from app.redis_client import get_redis
+from app.services.game_result_service import persist_game_result
 from app.services.room_service import RoomService
 from app.utils.redis_keys import RedisKeys
 
@@ -1084,6 +1085,7 @@ class GameSyncRuntime:
         *,
         excluded_player_ids: set[int] | None = None,
     ) -> dict | None:
+        await persist_game_result(state)
         room_service = RoomService()
         redis = get_redis()
         excluded = excluded_player_ids or set()

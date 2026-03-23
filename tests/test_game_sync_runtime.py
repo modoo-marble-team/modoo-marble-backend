@@ -572,6 +572,10 @@ async def test_finalize_finished_game_keeps_room_and_clears_game_keys(monkeypatc
     )
     monkeypatch.setattr(runtime, "clear_active_game", clear_active_game)
     monkeypatch.setattr(runtime, "clear_disconnected_at", clear_disconnected_at)
+    monkeypatch.setattr(
+        "app.game.sync_runtime.persist_game_result",
+        AsyncMock(),
+    )
 
     await runtime.finalize_finished_game(state)
 
@@ -676,6 +680,10 @@ async def test_finalize_finished_game_cleans_up_room_when_nobody_connected(monke
     )
     monkeypatch.setattr(runtime, "clear_active_game", clear_active_game)
     monkeypatch.setattr(runtime, "clear_disconnected_at", clear_disconnected_at)
+    monkeypatch.setattr(
+        "app.game.sync_runtime.persist_game_result",
+        AsyncMock(),
+    )
 
     await runtime.finalize_finished_game(state)
 
