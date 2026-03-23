@@ -34,7 +34,7 @@ class Settings(BaseSettings):
 
     REFRESH_COOKIE_NAME: str = "modoo_refresh_token"
     REFRESH_COOKIE_SECURE: bool | None = None
-    REFRESH_COOKIE_SAMESITE: str = "lax"
+    REFRESH_COOKIE_SAMESITE: str = "none"
     REFRESH_COOKIE_PATH: str = "/api/auth"
     REFRESH_COOKIE_DOMAIN: str = ""
 
@@ -67,6 +67,17 @@ class Settings(BaseSettings):
             return False
         return value
 
+    @field_validator("REFRESH_COOKIE_SAMESITE", mode="before")
+    @classmethod
+    def normalize_refresh_cookie_samesite(cls, value: object) -> str:
+        if value is None:
+            return "none"
+
+        normalized = str(value).strip().lower()
+        if normalized not in {"lax", "strict", "none"}:
+            raise ValueError("REFRESH_COOKIE_SAMESITE must be one of lax, strict, none")
+        return normalized
+
     @model_validator(mode="after")
     def set_refresh_cookie_secure_default(self) -> Settings:
         if not self.JWT_SECRET:
@@ -76,6 +87,8 @@ class Settings(BaseSettings):
                 raise ValueError("JWT_SECRET is required")
         if self.REFRESH_COOKIE_SECURE is None:
             self.REFRESH_COOKIE_SECURE = self.APP_ENV != "development"
+        if self.REFRESH_COOKIE_SAMESITE == "none":
+            self.REFRESH_COOKIE_SECURE = True
         return self
 
 

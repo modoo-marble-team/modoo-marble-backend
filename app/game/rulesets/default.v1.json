@@ -1,0 +1,109 @@
+{
+  "version": "default.v1",
+  "initial_balance": 1000000,
+  "start_salary": 100000,
+  "max_rounds": 20,
+  "max_building_level": 3,
+  "island_tile_id": 8,
+  "prompt_timeout_seconds": 30,
+  "turn_timeout_seconds": 30,
+  "building_stage_labels": {
+    "1": "별장",
+    "2": "호텔",
+    "3": "랜드마크"
+  },
+  "sell_refund": {
+    "purchase_price": 0.9,
+    "build_cost": 0.75
+  },
+  "acquisition": {
+    "multiplier": 1.5
+  },
+  "property_tiers": {
+    "1": {
+      "price": 30000,
+      "tolls": [10000, 15000, 30000, 80000],
+      "build_costs": [20000, 30000, 40000]
+    },
+    "2": {
+      "price": 50000,
+      "tolls": [15000, 25000, 65000, 120000],
+      "build_costs": [25000, 50000, 70000]
+    },
+    "3": {
+        "price": 70000,
+        "tolls": [20000, 40000, 90000, 180000],
+        "build_costs": [50000, 90000, 140000]
+    },
+    "4": {
+      "price": 110000,
+      "tolls": [35000, 70000, 130000, 250000],
+      "build_costs": [80000, 170000, 300000]
+    },
+    "5": {
+      "price": 150000,
+      "tolls": [45000, 90000, 180000, 320000],
+      "build_costs": [100000, 180000, 320000]
+    }
+  },
+  "board": [
+    {"tile_id": 0, "name": "출발", "tile_type": "START"},
+    {"tile_id": 1, "name": "수원", "tile_type": "PROPERTY", "tier": 1},
+    {"tile_id": 2, "name": "용인", "tile_type": "PROPERTY", "tier": 1},
+    {"tile_id": 3, "name": "찬스", "tile_type": "CHANCE"},
+    {"tile_id": 4, "name": "군산", "tile_type": "PROPERTY", "tier": 1},
+    {"tile_id": 5, "name": "태백", "tile_type": "PROPERTY", "tier": 1},
+    {"tile_id": 6, "name": "울산", "tile_type": "PROPERTY", "tier": 1},
+    {"tile_id": 7, "name": "이벤트", "tile_type": "EVENT"},
+    {"tile_id": 8, "name": "무인도", "tile_type": "ISLAND"},
+    {"tile_id": 9, "name": "경주", "tile_type": "PROPERTY", "tier": 1},
+    {"tile_id": 10, "name": "찬스", "tile_type": "CHANCE"},
+    {"tile_id": 11, "name": "포항", "tile_type": "PROPERTY", "tier": 2},
+    {"tile_id": 12, "name": "대구", "tile_type": "PROPERTY", "tier": 3},
+    {"tile_id": 13, "name": "창원", "tile_type": "PROPERTY", "tier": 2},
+    {"tile_id": 14, "name": "익산", "tile_type": "PROPERTY", "tier": 3},
+    {"tile_id": 15, "name": "부산", "tile_type": "PROPERTY", "tier": 5},
+    {"tile_id": 16, "name": "여행", "tile_type": "TRAVEL"},
+    {"tile_id": 17, "name": "제주", "tile_type": "PROPERTY", "tier": 5},
+    {"tile_id": 18, "name": "여수", "tile_type": "PROPERTY", "tier": 3},
+    {"tile_id": 19, "name": "광주", "tile_type": "PROPERTY", "tier": 3},
+    {"tile_id": 20, "name": "이벤트", "tile_type": "EVENT"},
+    {"tile_id": 21, "name": "춘천", "tile_type": "PROPERTY", "tier": 2},
+    {"tile_id": 22, "name": "강릉", "tile_type": "PROPERTY", "tier": 4},
+    {"tile_id": 23, "name": "전주", "tile_type": "PROPERTY", "tier": 2},
+    {"tile_id": 24, "name": "섬으로 이동", "tile_type": "MOVE_TO_ISLAND"},
+    {"tile_id": 25, "name": "청주", "tile_type": "PROPERTY", "tier": 2},
+    {"tile_id": 26, "name": "천안", "tile_type": "PROPERTY", "tier": 3},
+    {"tile_id": 27, "name": "찬스", "tile_type": "CHANCE"},
+    {"tile_id": 28, "name": "대전", "tile_type": "PROPERTY", "tier": 4},
+    {"tile_id": 29, "name": "인천", "tile_type": "PROPERTY", "tier": 4},
+    {"tile_id": 30, "name": "이벤트", "tile_type": "EVENT"},
+    {"tile_id": 31, "name": "서울", "tile_type": "PROPERTY", "tier": 5}
+  ],
+  "chance_cards": [
+    {"type": "GAIN_MONEY", "effect": "GOOD", "amount": 30000, "description": "복권 당첨! 3억원을 획득합니다."},
+    {"type": "GAIN_MONEY", "effect": "GOOD", "amount": 20000, "description": "주식 상승! 2억원을 획득합니다."},
+    {"type": "GAIN_MONEY", "effect": "GOOD", "amount": 10000, "description": "지원금 수령! 1억원을 획득합니다."},
+    {"type": "LOSE_MONEY", "effect": "BAD", "amount": 15000, "description": "병원비 지출! 1억 5천만원을 지불합니다."},
+    {"type": "LOSE_MONEY", "effect": "BAD", "amount": 20000, "description": "벌금 지출! 2억원을 지불합니다."},
+    {"type": "LOSE_MONEY", "effect": "BAD", "amount": 30000, "description": "세금 지출! 3억원을 지불합니다."},
+    {"type": "MOVE_FORWARD", "effect": "COMMON", "amount": 3, "description": "앞으로 3칸 이동합니다."},
+    {"type": "MOVE_FORWARD", "effect": "COMMON", "amount": 5, "description": "앞으로 5칸 이동합니다."},
+    {"type": "MOVE_BACKWARD", "effect": "COMMON", "amount": 2, "description": "뒤로 2칸 이동합니다."},
+    {"type": "MOVE_BACKWARD", "effect": "COMMON", "amount": 3, "description": "뒤로 3칸 이동합니다."},
+    {"type": "STEAL_PROPERTY", "effect": "GOOD", "amount": 0, "description": "$player$의 $property$$suffix$ 점유했습니다." ,"failed_description": "땅 훔치기! 훔칠 땅이 없어서 실패했습니다..."},
+    {"type": "GIVE_PROPERTY", "effect": "BAD", "amount": 0, "description": "$player$ 에게 $property$$suffix$ 넘겨줬습니다." , "failed_description": "땅 넘기기! 넘겨줄 땅이 없어서 실패했습니다..."},
+    {"type": "TOLL_MULTIPLIER", "effect": "FESTIVAL", "duration": 3, "multiplier": 2, "description": "올림픽 개최! 3턴 동안 모든 통행료가 2배가 됩니다."},
+    {"type": "TOLL_MULTIPLIER", "effect": "PANDEMIC", "duration": 3, "multiplier": 0.5, "description": "전염병 확산! 3턴 동안 모든 통행료가 절반이 됩니다."},
+    {"type": "PRICE_MULTIPLIER", "effect": "INFLATION", "duration": 3, "multiplier": 1.5, "description": "인플레이션 발생! 3턴 동안 토지/건설 비용이 50% 증가 됩니다."},
+    {"type": "PRICE_MULTIPLIER", "effect": "DEFLATION", "duration": 3, "multiplier": 0.7, "description": "디플레이션 발생! 3턴 동안 토지/건설 비용이 30% 감소 됩니다."},
+    {"type": "EXTRA_TURN", "effect": "TRANSIT_CARD", "duration": 2, "description": "교통카드 획득! 추가턴 2회를 획득합니다."},
+    {"type": "EXTRA_TURN", "effect": "CAR", "duration": 3, "description": "자동차를 얻었습니다. 추가턴 3회를 획득합니다."}
+  ],
+  "event_cards": [
+    {"type": "GAIN_MONEY", "effect": "GOOD", "amount": 30000, "description": "복권에 당첨되어 3억원을 획득합니다."},
+    {"type": "GAIN_MONEY", "effect": "GOOD", "amount": 20000, "description": "보유 주식이 올라 2억원을 획득합니다."},
+    {"type": "GAIN_MONEY", "effect": "GOOD", "amount": 10000, "description": "지원금 1억원을 획득합니다."},
+    {"type": "LOSE_MONEY", "effect": "BAD", "amount": 15000, "description": "병원비로 1억 5천만원을 지불합니다."}
+  ]
+}
