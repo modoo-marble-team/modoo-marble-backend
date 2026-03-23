@@ -20,6 +20,7 @@ from app.game.state import delete_game_state, game_lock, get_game_state, save_ga
 from app.game.timer import cancel_turn_timer
 from app.presence import update_status
 from app.redis_client import get_redis
+from app.services.game_result_service import persist_game_result
 from app.services.room_service import RoomService
 
 logger = structlog.get_logger()
@@ -825,8 +826,6 @@ class GameSyncRuntime:
         return state.active_players()
 
     async def finalize_finished_game(self, state: GameState) -> dict | None:
-        from app.services.game_result_service import persist_game_result
-
         await persist_game_result(state)
         room_service = RoomService()
         redis = get_redis()

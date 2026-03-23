@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 
 from tortoise.exceptions import IntegrityError
@@ -18,8 +19,10 @@ class UsersService:
         return user
 
     async def get_stats(self, *, user_id: int) -> dict:
-        total = await UserGame.filter(user_id=user_id, placement__isnull=False).count()
-        wins = await UserGame.filter(user_id=user_id, placement=1).count()
+        total, wins = await asyncio.gather(
+            UserGame.filter(user_id=user_id, placement__isnull=False).count(),
+            UserGame.filter(user_id=user_id, placement=1).count(),
+        )
         return {"total_games": total, "wins": wins, "losses": total - wins}
 
     async def update_nickname(self, *, user_id: int, nickname: str) -> User:

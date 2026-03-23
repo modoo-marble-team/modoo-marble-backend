@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.game.state import get_game_state
@@ -21,8 +23,10 @@ async def get_me(auth: AuthUser = Depends(get_auth_user)) -> dict:
         raise HTTPException(status_code=403, detail="Guest not allowed")
 
     try:
-        user = await users_service.get_me(user_id=auth.user_id)
-        stats = await users_service.get_stats(user_id=auth.user_id)
+        user, stats = await asyncio.gather(
+            users_service.get_me(user_id=auth.user_id),
+            users_service.get_stats(user_id=auth.user_id),
+        )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
 
