@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends
 
 from app.game.state import get_game_state
@@ -30,16 +32,16 @@ def _raise_if_guest(auth: AuthUser) -> None:
         raise GuestNotAllowedError()
 
 
-def _build_me_response(user: User) -> UserMeResponse:
+def _build_me_response(user: User, stats: dict[str, int]) -> UserMeResponse:
     return UserMeResponse(
         id=int(user.id),
         nickname=user.nickname,
         profile_image_url=user.profile_image_url,
         is_guest=user.is_guest,
         stats=UserStatsResponse(
-            total_games=0,
-            wins=0,
-            losses=0,
+            total_games=stats["total_games"],
+            wins=stats["wins"],
+            losses=stats["losses"],
         ),
     )
 
@@ -47,8 +49,11 @@ def _build_me_response(user: User) -> UserMeResponse:
 @router.get("/me", response_model=UserMeResponse)
 async def get_me(auth: AuthUser = Depends(get_auth_user)) -> UserMeResponse:
     _raise_if_guest(auth)
-    user = await users_service.get_me(user_id=auth.user_id)
-    return _build_me_response(user)
+    user, stats = await asyncio.gather(
+        users_service.get_me(user_id=auth.user_id),
+        users_service.get_stats(user_id=auth.user_id),
+    )
+    return _build_me_response(user, stats)
 
 
 @router.patch("/me/nickname", response_model=UpdateNicknameResponse)
@@ -78,9 +83,11 @@ async def get_me_context(
     room_game_id = str(room.get("game_id")) if room and room.get("game_id") else None
     game_id = room_game_id or active_game_id or legacy_game_id
 
-    if game_id and room is None:
+    if game_id:
         state = await get_game_state(game_id)
-        if state is not None:
+        if state is None:
+            game_id = None
+        elif room is None:
             room_id = state.room_id
             room = await room_service.get_room(room_id)
 
