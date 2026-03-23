@@ -1,60 +1,67 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 
 from app.game.state import get_game_state
+from app.models.user import User
 from app.presence import get_user_status, list_online
 from app.redis_client import get_redis
-from app.schemas.users import CurrentUserContextResponse, UpdateNicknameRequest
+from app.schemas.users import (
+    CurrentUserContextResponse,
+    UpdateNicknameRequest,
+    UpdateNicknameResponse,
+    UserMeResponse,
+    UserStatsResponse,
+)
 from app.services.room_service import RoomService
 from app.services.users_service import UsersService
 from app.utils.auth_dep import AuthUser, get_auth_user
+from app.utils.exceptions import GuestNotAllowedError
 from app.utils.redis_keys import RedisKeys
 
 router = APIRouter(prefix="/users", tags=["Users"])
+
 users_service = UsersService()
 room_service = RoomService()
 
 
-@router.get("/me")
-async def get_me(auth: AuthUser = Depends(get_auth_user)) -> dict:
+def _raise_if_guest(auth: AuthUser) -> None:
     if auth.is_guest:
-        raise HTTPException(status_code=403, detail="Guest not allowed")
-
-    try:
-        user = await users_service.get_me(user_id=auth.user_id)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-
-    return {
-        "id": int(user.id),
-        "nickname": user.nickname,
-        "profile_image_url": user.profile_image_url,
-        "is_guest": user.is_guest,
-        "stats": {"total_games": 0, "wins": 0, "losses": 0},
-    }
+        raise GuestNotAllowedError()
 
 
-@router.patch("/me/nickname")
+def _build_me_response(user: User) -> UserMeResponse:
+    return UserMeResponse(
+        id=int(user.id),
+        nickname=user.nickname,
+        profile_image_url=user.profile_image_url,
+        is_guest=user.is_guest,
+        stats=UserStatsResponse(
+            total_games=0,
+            wins=0,
+            losses=0,
+        ),
+    )
+
+
+@router.get("/me", response_model=UserMeResponse)
+async def get_me(auth: AuthUser = Depends(get_auth_user)) -> UserMeResponse:
+    _raise_if_guest(auth)
+    user = await users_service.get_me(user_id=auth.user_id)
+    return _build_me_response(user)
+
+
+@router.patch("/me/nickname", response_model=UpdateNicknameResponse)
 async def patch_nickname(
-    payload: UpdateNicknameRequest, auth: AuthUser = Depends(get_auth_user)
-) -> dict:
-    if auth.is_guest:
-        raise HTTPException(status_code=403, detail="Guest not allowed")
-
-    try:
-        user = await users_service.update_nickname(
-            user_id=auth.user_id, nickname=payload.nickname
-        )
-    except ValueError as e:
-        msg = str(e)
-        if msg == "Invalid nickname":
-            raise HTTPException(status_code=400, detail=msg) from e
-        if msg == "Nickname already exists":
-            raise HTTPException(status_code=409, detail=msg) from e
-        raise HTTPException(status_code=404, detail=msg) from e
-
-    return {"id": int(user.id), "nickname": user.nickname}
+    payload: UpdateNicknameRequest,
+    auth: AuthUser = Depends(get_auth_user),
+) -> UpdateNicknameResponse:
+    _raise_if_guest(auth)
+    nickname = await users_service.update_nickname(
+        user_id=auth.user_id,
+        nickname=payload.nickname,
+    )
+    return UpdateNicknameResponse(id=auth.user_id, nickname=nickname)
 
 
 @router.get("/me/context", response_model=CurrentUserContextResponse)
