@@ -6,6 +6,7 @@ from app.game.game_rules import MAX_ROUNDS
 from app.game.models import GameState
 from app.game.patch import op_set
 from app.game.rules import (
+    build_rankings_payload,
     PHASE_GAME_OVER,
     PHASE_RESOLVING,
     PHASE_WAIT_PROMPT,
@@ -102,11 +103,13 @@ def process_end_turn(
 
     if len(state.active_players()) <= 1:
         winner = _find_winner(state)
+        rankings = build_rankings_payload(state)
         return [
             {
                 "type": ServerEventType.GAME_OVER,
                 "reason": "last_player_standing",
                 "winner": winner,
+                "rankings": rankings,
             }
         ], [
             op_set("status", "finished"),
@@ -202,6 +205,7 @@ def process_end_turn(
 
     if new_round > MAX_ROUNDS:
         winner = _find_winner(state)
+        rankings = build_rankings_payload(state)
         patches.extend(
             [
                 op_set("status", "finished"),
@@ -214,6 +218,7 @@ def process_end_turn(
                 "type": ServerEventType.GAME_OVER,
                 "reason": "max_rounds",
                 "winner": winner,
+                "rankings": rankings,
             }
         )
 

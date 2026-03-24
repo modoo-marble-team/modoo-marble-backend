@@ -15,7 +15,12 @@ from app.game.enums import PlayerState, ServerEventType
 from app.game.models import GameState, PlayerGameState
 from app.game.patch import op_set
 from app.game.presentation import serialize_game_patch
-from app.game.rules import PHASE_GAME_OVER, PHASE_WAIT_ROLL, build_winner_payload
+from app.game.rules import (
+    PHASE_GAME_OVER,
+    PHASE_WAIT_ROLL,
+    build_rankings_payload,
+    build_winner_payload,
+)
 from app.game.state import delete_game_state, game_lock, get_game_state, save_game_state
 from app.game.timer import cancel_turn_timer
 from app.presence import update_status
@@ -427,6 +432,7 @@ class GameSyncRuntime:
                     if alive_players
                     else None
                 )
+                rankings = build_rankings_payload(state)
                 state.status = "finished"
                 state.phase = PHASE_GAME_OVER
                 state.pending_prompt = None
@@ -444,6 +450,7 @@ class GameSyncRuntime:
                         "type": ServerEventType.GAME_OVER,
                         "reason": "player_left",
                         "winner": winner,
+                        "rankings": rankings,
                     }
                 )
             elif state.current_player_id == user_id:
@@ -816,6 +823,7 @@ class GameSyncRuntime:
                         if alive_players
                         else None
                     )
+                    rankings = build_rankings_payload(state)
                     state.status = "finished"
                     state.phase = PHASE_GAME_OVER
                     state.pending_prompt = None
@@ -833,6 +841,7 @@ class GameSyncRuntime:
                             "type": ServerEventType.GAME_OVER,
                             "reason": "disconnect_timeout",
                             "winner": winner,
+                            "rankings": rankings,
                         }
                     )
                 elif state.current_player_id == player_id:
@@ -931,6 +940,7 @@ class GameSyncRuntime:
     ) -> None:
         active_players = self._active_players(state)
         if not active_players:
+            rankings = build_rankings_payload(state)
             state.status = "finished"
             state.phase = PHASE_GAME_OVER
             state.pending_prompt = None
@@ -948,6 +958,7 @@ class GameSyncRuntime:
                     "type": ServerEventType.GAME_OVER,
                     "reason": "disconnect_timeout",
                     "winner": None,
+                    "rankings": rankings,
                 }
             )
             return

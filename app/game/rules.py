@@ -171,6 +171,36 @@ def build_winner_payload(state: GameState, player_id: int) -> dict[str, int | st
     }
 
 
+def build_rankings_payload(
+    state: GameState,
+    players: list | None = None,
+) -> list[dict[str, int | str | bool]]:
+    candidates = players if players is not None else list(state.players.values())
+    ranked_players = sorted(
+        candidates,
+        key=lambda player: (
+            get_player_total_assets(state, player.player_id),
+            player.balance,
+            -player.turn_order,
+        ),
+        reverse=True,
+    )
+    if not ranked_players:
+        return []
+
+    winner_id = ranked_players[0].player_id
+    return [
+        {
+            "rank": rank,
+            "playerId": player.player_id,
+            "nickname": player.nickname,
+            "finalAssets": get_player_total_assets(state, player.player_id),
+            "isWinner": player.player_id == winner_id,
+        }
+        for rank, player in enumerate(ranked_players, start=1)
+    ]
+
+
 def find_winner_by_assets(
     state: GameState,
     players: list | None = None,
@@ -280,6 +310,7 @@ def _append_game_over_if_last_survivor(
         if winner is None
         else build_winner_payload(preview_state, winner.player_id)
     )
+    rankings_payload = build_rankings_payload(preview_state)
 
     patches.extend(
         [
@@ -294,6 +325,7 @@ def _append_game_over_if_last_survivor(
             "type": ServerEventType.GAME_OVER,
             "reason": "last_player_standing",
             "winner": winner_payload,
+            "rankings": rankings_payload,
         }
     )
 

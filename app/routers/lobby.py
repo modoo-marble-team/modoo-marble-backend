@@ -54,6 +54,33 @@ async def get_rooms(
     return {"rooms": rooms, "total": len(rooms)}
 
 
+@router.get("/rooms/{room_id}", response_model=RoomSnapshotResponse)
+async def get_room_snapshot(
+    room_id: str,
+    auth: AuthUser = Depends(get_auth_user),
+) -> dict:
+    room = await room_service.get_room(room_id)
+    if room is None:
+        raise ApiError(
+            status_code=404,
+            code="ROOM_NOT_FOUND",
+            message="방을 찾을 수 없습니다.",
+        )
+
+    member = next(
+        (player for player in room["players"] if player["id"] == str(auth.user_id)),
+        None,
+    )
+    if member is None:
+        raise ApiError(
+            status_code=403,
+            code="NOT_ROOM_MEMBER",
+            message="방 멤버가 아닙니다.",
+        )
+
+    return room_service.room_snapshot(room)
+
+
 @router.post("/rooms", response_model=dict)
 async def create_room(
     payload: CreateRoomRequest,
