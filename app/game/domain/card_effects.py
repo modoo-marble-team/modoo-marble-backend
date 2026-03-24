@@ -20,6 +20,7 @@ class CardEffectContext:
     # 카드 효과가 외부 기능을 호출할 때 쓰는 함수 묶음.
     board_size: int
     start_salary: int
+    max_building_level: int
     apply_money_delta: Callable[[GameState, int, int], tuple[list[dict], list[dict]]]
     choose_random: Callable[[Sequence[Any]], Any]
     player_name: Callable[[GameState, int], str]
@@ -163,12 +164,14 @@ class StealPropertyCardEffect(BaseCardEffect):
         card: dict,
         context: CardEffectContext,
     ) -> ActionResult:
-        # 다른 플레이어의 땅 하나를 무작위로 가져온다.
+        # 다른 플레이어의 땅 하나를 무작위로 가져온다. 랜드마크는 제외한다.
         owned_tiles = [
             (candidate_id, tile_id)
             for candidate_id, candidate in state.players.items()
             if candidate_id != player_id and not candidate.is_bankrupt
             for tile_id in candidate.owned_tiles
+            if (t := state.tile(tile_id)) is not None
+            and t.building_level < context.max_building_level
         ]
         if not owned_tiles:
             return [
@@ -233,9 +236,15 @@ class GivePropertyCardEffect(BaseCardEffect):
         card: dict,
         context: CardEffectContext,
     ) -> ActionResult:
-        # 내 땅 하나를 다른 플레이어에게 넘긴다.
+        # 내 땅 하나를 다른 플레이어에게 넘긴다. 랜드마크는 제외한다.
         player = state.require_player(player_id)
-        if not player.owned_tiles:
+        giveable_tiles = [
+            tile_id
+            for tile_id in player.owned_tiles
+            if (t := state.tile(tile_id)) is not None
+            and t.building_level < context.max_building_level
+        ]
+        if not giveable_tiles:
             return [
                 {
                     "type": ServerEventType.CHANCE_RESOLVED,
@@ -272,7 +281,7 @@ class GivePropertyCardEffect(BaseCardEffect):
                 }
             ], []
 
-        given_tile_id = context.choose_random(player.owned_tiles)
+        given_tile_id = context.choose_random(giveable_tiles)
         receiver_id = context.choose_random(receivers)
         receiver_name = context.player_name(state, receiver_id)
         tile_name = context.tile_name(given_tile_id)

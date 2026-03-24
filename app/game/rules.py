@@ -56,7 +56,7 @@ from app.game.game_rules import (
 from app.game.game_rules import (
     PROMPT_TIMEOUT_SECONDS as _RULESET_PROMPT_TIMEOUT_SECONDS,
 )
-from app.game.models import GameState, PendingPrompt, PromptChoice
+from app.game.models import GameState, PendingPrompt, PlayerGameState, PromptChoice
 from app.game.patch import op_inc, op_push, op_set
 from app.game.state import apply_patches
 
@@ -171,23 +171,62 @@ def build_winner_payload(state: GameState, player_id: int) -> dict[str, int | st
     }
 
 
+def _rank_players_by_assets(
+    state: GameState,
+    players: list[PlayerGameState] | None = None,
+) -> list[tuple[PlayerGameState, int]]:
+    candidates = players if players is not None else list(state.players.values())
+    player_assets = [
+        (player, get_player_total_assets(state, player.player_id))
+        for player in candidates
+    ]
+    return sorted(
+        player_assets,
+        key=lambda item: (
+            item[1],
+            item[0].balance,
+            -item[0].turn_order,
+        ),
+        reverse=True,
+    )
+
+
+def build_rankings_payload(
+    state: GameState,
+    players: list[PlayerGameState] | None = None,
+) -> list[dict[str, int | str | bool]]:
+    ranked_players = _rank_players_by_assets(state, players)
+    if not ranked_players:
+        return []
+
+    winner_id = ranked_players[0][0].player_id
+    return [
+        {
+            "rank": rank,
+            "playerId": player.player_id,
+            "nickname": player.nickname,
+            "finalAssets": total_assets,
+            "isWinner": player.player_id == winner_id,
+        }
+        for rank, (player, total_assets) in enumerate(ranked_players, start=1)
+    ]
+
+
 def find_winner_by_assets(
     state: GameState,
-    players: list | None = None,
+    players: list[PlayerGameState] | None = None,
 ) -> dict[str, int | str] | None:
-    candidates = players if players is not None else list(state.players.values())
-    if not candidates:
+    ranked_players = _rank_players_by_assets(state, players)
+    if not ranked_players:
         return None
 
-    winner = max(
-        candidates,
-        key=lambda player: (
-            get_player_total_assets(state, player.player_id),
-            player.balance,
-            -player.turn_order,
-        ),
-    )
-    return build_winner_payload(state, winner.player_id)
+    winner, winner_assets = ranked_players[0]
+    return {
+        "playerId": winner.player_id,
+        "nickname": winner.nickname,
+        "balance": winner.balance,
+        "assets": winner_assets,
+    }
 
 
 def _player_name(state: GameState, player_id: int) -> str:
@@ -280,6 +319,7 @@ def _append_game_over_if_last_survivor(
         if winner is None
         else build_winner_payload(preview_state, winner.player_id)
     )
+    rankings_payload = build_rankings_payload(preview_state)
 
     patches.extend(
         [
@@ -294,6 +334,7 @@ def _append_game_over_if_last_survivor(
             "type": ServerEventType.GAME_OVER,
             "reason": "last_player_standing",
             "winner": winner_payload,
+            "rankings": rankings_payload,
         }
     )
 
@@ -588,6 +629,7 @@ def _build_card_effect_context() -> CardEffectContext:
     return CardEffectContext(
         board_size=BOARD_SIZE,
         start_salary=START_SALARY,
+        max_building_level=MAX_BUILDING_LEVEL,
         apply_money_delta=lambda state, player_id, amount: _apply_money_delta(
             state,
             player_id=player_id,

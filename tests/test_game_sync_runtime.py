@@ -572,6 +572,10 @@ async def test_finalize_finished_game_keeps_room_and_clears_game_keys(monkeypatc
     )
     monkeypatch.setattr(runtime, "clear_active_game", clear_active_game)
     monkeypatch.setattr(runtime, "clear_disconnected_at", clear_disconnected_at)
+    monkeypatch.setattr(
+        "app.game.sync_runtime.persist_game_result",
+        AsyncMock(),
+    )
 
     await runtime.finalize_finished_game(state)
 
@@ -676,6 +680,10 @@ async def test_finalize_finished_game_cleans_up_room_when_nobody_connected(monke
     )
     monkeypatch.setattr(runtime, "clear_active_game", clear_active_game)
     monkeypatch.setattr(runtime, "clear_disconnected_at", clear_disconnected_at)
+    monkeypatch.setattr(
+        "app.game.sync_runtime.persist_game_result",
+        AsyncMock(),
+    )
 
     await runtime.finalize_finished_game(state)
 
@@ -693,3 +701,149 @@ async def test_finalize_finished_game_cleans_up_room_when_nobody_connected(monke
         "lobby_updated",
         {"action": "removed", "room": {"id": "room-1"}},
     )
+
+
+@pytest.mark.asyncio
+async def test_leave_game_returns_true_when_game_already_finished(monkeypatch):
+    """게임이 이미 종료(finished)된 상태에서 나가기 요청 시 멤버십을 정리하고 True를 반환해야 한다.
+
+    GAME_OVER 이벤트 직후 finalize 완료 전에 플레이어가 나가기를 누르면
+    state.status == "finished"이지만 room.status는 아직 "playing"일 수 있다.
+    이 경우 기존에는 False를 반환해 "게임 나가기를 처리할 수 없습니다." 에러가 발생했다.
+    """
+    sio = AsyncMock()
+    runtime = GameSyncRuntime(sio)
+
+    state = GameState(
+        game_id="game-1",
+        room_id="room-1",
+        revision=10,
+        turn=5,
+        round=3,
+        current_player_id=2,
+        status="finished",
+        phase="GAME_OVER",
+        pending_prompt=None,
+        winner_id=2,
+        players={
+            1: PlayerGameState(
+                player_id=1,
+                nickname="host",
+                balance=0,
+                current_tile_id=0,
+                player_state=PlayerState.BANKRUPT,
+                state_duration=0,
+                consecutive_doubles=0,
+                owned_tiles=[],
+                building_levels={},
+                turn_order=0,
+            ),
+            2: PlayerGameState(
+                player_id=2,
+                nickname="guest",
+                balance=INITIAL_BALANCE,
+                current_tile_id=0,
+                player_state=PlayerState.NORMAL,
+                state_duration=0,
+                consecutive_doubles=0,
+                owned_tiles=[],
+                building_levels={},
+                turn_order=1,
+            ),
+        },
+        tiles={},
+    )
+
+    @asynccontextmanager
+    async def fake_game_lock(_game_id: str):
+        yield
+
+    cleanup_membership = AsyncMock()
+
+    monkeypatch.setattr("app.game.sync_runtime.game_lock", fake_game_lock)
+    monkeypatch.setattr(
+        "app.game.sync_runtime.get_game_state",
+        AsyncMock(return_value=state),
+    )
+    monkeypatch.setattr(runtime, "_cleanup_player_game_membership", cleanup_membership)
+
+    left = await runtime.leave_game(game_id="game-1", user_id=1)
+
+    assert left is True
+    cleanup_membership.assert_awaited_once_with(
+        game_id="game-1",
+        room_id="room-1",
+        player_id=1,
+        presence_status="lobby",
+        leave_socket_rooms=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_leave_game_returns_false_when_game_state_missing(monkeypatch):
+    """Redis에 게임 상태가 없으면 False를 반환해야 한다."""
+    sio = AsyncMock()
+    runtime = GameSyncRuntime(sio)
+
+    @asynccontextmanager
+    async def fake_game_lock(_game_id: str):
+        yield
+
+    monkeypatch.setattr("app.game.sync_runtime.game_lock", fake_game_lock)
+    monkeypatch.setattr(
+        "app.game.sync_runtime.get_game_state",
+        AsyncMock(return_value=None),
+    )
+
+    left = await runtime.leave_game(game_id="ghost-game", user_id=1)
+
+    assert left is False
+
+
+@pytest.mark.asyncio
+async def test_leave_game_returns_false_when_player_not_in_finished_game(monkeypatch):
+    """게임이 종료됐더라도 해당 플레이어가 게임에 없으면 False를 반환해야 한다."""
+    sio = AsyncMock()
+    runtime = GameSyncRuntime(sio)
+
+    state = GameState(
+        game_id="game-1",
+        room_id="room-1",
+        revision=10,
+        turn=5,
+        round=3,
+        current_player_id=2,
+        status="finished",
+        phase="GAME_OVER",
+        pending_prompt=None,
+        winner_id=2,
+        players={
+            2: PlayerGameState(
+                player_id=2,
+                nickname="guest",
+                balance=INITIAL_BALANCE,
+                current_tile_id=0,
+                player_state=PlayerState.NORMAL,
+                state_duration=0,
+                consecutive_doubles=0,
+                owned_tiles=[],
+                building_levels={},
+                turn_order=1,
+            ),
+        },
+        tiles={},
+    )
+
+    @asynccontextmanager
+    async def fake_game_lock(_game_id: str):
+        yield
+
+    monkeypatch.setattr("app.game.sync_runtime.game_lock", fake_game_lock)
+    monkeypatch.setattr(
+        "app.game.sync_runtime.get_game_state",
+        AsyncMock(return_value=state),
+    )
+
+    left = await runtime.leave_game(game_id="game-1", user_id=99)
+
+    assert left is False

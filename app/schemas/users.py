@@ -16,3 +16,22 @@ class CurrentUserContextResponse(BaseModel):
     game_id: str | None
     presence_status: str | None
     resume_target: Literal["lobby", "room", "game"]
+
+
+class UserStatsResponse(BaseModel):
+    total_games: int
+    wins: int
+    losses: int
+
+
+class UserMeResponse(BaseModel):
+    id: int
+    nickname: str
+    profile_image_url: str | None = None
+    is_guest: bool
+    stats: UserStatsResponse
+
+
+class UpdateNicknameResponse(BaseModel):
+    id: int
+    nickname: str

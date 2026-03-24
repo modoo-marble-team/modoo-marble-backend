@@ -69,6 +69,11 @@ def apply_property_acquisition(
     if owner_id is None or owner_id == player_id:
         raise GameActionError(code="INVALID_PHASE", message="인수 대상 땅이 없습니다.")
 
+    if tile_def.building_level >= context.max_building_level:
+        raise GameActionError(
+            code="LANDMARK_NOT_ACQUIRABLE", message="랜드마크는 인수할 수 없습니다."
+        )
+
     player = state.require_player(player_id)
     acquisition_cost = context.get_acquisition_cost(
         state, tile_id, tile_def.building_level
