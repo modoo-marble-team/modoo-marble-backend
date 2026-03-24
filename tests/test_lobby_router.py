@@ -142,3 +142,31 @@ def test_leave_room_routes_playing_room_to_immediate_game_leave(monkeypatch):
 
     assert result == {"success": True, "new_host_id": "2"}
     assert sio.emitted == []
+
+
+def test_get_room_snapshot_returns_snapshot_for_member(monkeypatch):
+    room = {
+        "id": "room-1",
+        "title": "테스트 방",
+        "status": "waiting",
+        "max_players": 4,
+        "is_private": False,
+        "players": [
+            {"id": "1", "nickname": "host", "is_host": True, "is_ready": False},
+            {"id": "2", "nickname": "guest", "is_host": False, "is_ready": True},
+        ],
+        "chat_messages": [],
+    }
+    auth = SimpleNamespace(user_id=1)
+
+    async def fake_get_room(room_id: str) -> dict | None:
+        assert room_id == "room-1"
+        return room
+
+    monkeypatch.setattr(lobby.room_service, "get_room", fake_get_room)
+
+    result = asyncio.run(lobby.get_room_snapshot("room-1", auth))
+
+    assert result["room_id"] == "room-1"
+    assert result["status"] == "waiting"
+    assert len(result["players"]) == 2

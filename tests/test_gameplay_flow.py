@@ -783,6 +783,43 @@ def test_travel_prompt_moves_to_selected_tile_and_chains_into_tile_prompt():
     assert state.phase == "WAIT_PROMPT"
 
 
+def test_travel_past_start_does_not_grant_salary():
+    state = make_state()
+    player = state.require_player(1)
+    player.current_tile_id = 16
+    balance_before = player.balance
+
+    travel_events, travel_patches = resolve_landing(state, 1, 16)
+    apply_patches(state, travel_patches)
+
+    prompt = state.pending_prompt
+    assert prompt is not None
+    assert prompt.type == "TRAVEL_SELECT"
+    assert travel_events == []
+
+    response_events, response_patches = process_prompt_response(
+        state,
+        player_id=1,
+        prompt_id=prompt.prompt_id,
+        choice="CONFIRM",
+        payload={"targetTileId": 4},
+    )
+    apply_patches(state, response_patches)
+
+    assert any(
+        event["type"] == "PLAYER_MOVED"
+        and event["trigger"] == "travel"
+        and event["fromTileId"] == 16
+        and event["toTileId"] == 4
+        for event in response_events
+    )
+    assert not any(
+        event["type"] == "PLAYER_MOVED" and event.get("passGo") is True
+        for event in response_events
+    )
+    assert state.require_player(1).balance == balance_before
+
+
 def test_bankrupt_player_is_skipped_in_turn_order(monkeypatch):
     state = make_state()
     state.players[3] = PlayerGameState(
@@ -846,6 +883,9 @@ def test_last_player_standing_triggers_game_over():
     assert len(game_over_events) == 1
     assert game_over_events[0]["reason"] == "last_player_standing"
     assert game_over_events[0]["winner"]["assets"] == INITIAL_BALANCE
+    assert game_over_events[0]["rankings"][0]["playerId"] == 1
+    assert game_over_events[0]["rankings"][0]["isWinner"] is True
+    assert game_over_events[0]["rankings"][1]["playerId"] == 2
     assert state.status == "finished"
 
 
@@ -873,6 +913,8 @@ def test_max_rounds_uses_total_assets_for_winner():
     assert game_over_events[0]["reason"] == "max_rounds"
     assert game_over_events[0]["winner"]["playerId"] == 1
     assert game_over_events[0]["winner"]["assets"] == player_one_assets
+    assert [item["playerId"] for item in game_over_events[0]["rankings"]] == [1, 2]
+    assert game_over_events[0]["rankings"][0]["finalAssets"] == player_one_assets
     assert state.winner_id == 1
     assert state.status == "finished"
 

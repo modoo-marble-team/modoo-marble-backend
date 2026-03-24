@@ -6,7 +6,7 @@ from typing import Any
 from app.game.board import BOARD
 from app.game.enums import PlayerState
 from app.game.models import GameState, PlayerGameState
-from app.game.rules import PHASE_GAME_OVER, serialize_prompt
+from app.game.rules import PHASE_GAME_OVER, get_player_total_assets, serialize_prompt
 from app.game.timer import TURN_TIMEOUT_SECONDS
 
 PLAYER_COLORS = ["#EF5350", "#42A5F5", "#66BB6A", "#FFD15B"]
@@ -133,6 +133,7 @@ def serialize_game_snapshot(state: GameState) -> dict[str, Any]:
                 "nickname": player.nickname,
                 "currentTileId": player.current_tile_id,
                 "balance": player.balance,
+                "totalAssets": get_player_total_assets(state, player.player_id),
                 "ownedTiles": player.owned_tiles,
                 "isInJail": player.player_state == PlayerState.LOCKED,
                 "stateDuration": player.state_duration,
