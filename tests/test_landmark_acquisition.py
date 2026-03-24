@@ -249,7 +249,7 @@ class TestStealPropertyCardEffectLandmarkRestriction:
 
         assert len(patches) > 0
         # 소유권 이전 패치가 포함되어야 한다
-        assert any(TILE_A in str(p) for p in patches)
+        assert any(str(TILE_A) in str(p) for p in patches)
 
     def test_landmark_skipped_non_landmark_stolen(self):
         """상대가 랜드마크와 일반 땅을 함께 소유한 경우 일반 땅만 빼앗아야 한다."""
