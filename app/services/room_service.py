@@ -6,11 +6,10 @@ from uuid import uuid4
 
 from app.errors import ApiError
 from app.game.models import GameState
-from app.game.state import init_game_state
+from app.game.state import get_game_state, init_game_state
 from app.models.game import Game
 from app.models.user import User
 from app.models.user_game import UserGame
-from app.presence import update_status
 from app.redis_client import get_redis
 from app.utils.redis_keys import RedisKeys
 
@@ -23,6 +22,22 @@ def _now_iso() -> str:
 
 
 class RoomService:
+    async def _reconcile_existing_member_room(self, room: dict) -> dict:
+        if room.get("status") != "playing":
+            return room
+
+        game_id = str(room.get("game_id") or "")
+        if not game_id:
+            finished_room = await self.finish_game_room(room_id=str(room["id"]))
+            return finished_room or room
+
+        game_state = await get_game_state(game_id)
+        if game_state is not None and game_state.status == "playing":
+            return room
+
+        finished_room = await self.finish_game_room(room_id=str(room["id"]))
+        return finished_room or room
+
     async def _get_user(self, user_id: int) -> User:
         user = await User.get_or_none(id=user_id, deleted_at__isnull=True)
         if not user:
@@ -221,7 +236,7 @@ class RoomService:
         for player in room["players"]:
             if player["id"] == str(user_id):
                 await self._set_user_room_id(user_id, room_id)
-                return room
+                return await self._reconcile_existing_member_room(room)
 
         if room["status"] != "waiting":
             raise ApiError(
@@ -394,10 +409,6 @@ class RoomService:
                 str(game.id),
                 ex=ROOM_TTL_SECONDS,
             )
-
-        # 참여 플레이어 presence 상태를 "playing"으로 업데이트
-        for player_id in player_ids:
-            await update_status(user_id=str(player_id), status="playing")
 
         room["status"] = "playing"
         room["game_id"] = str(game.id)

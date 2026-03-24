@@ -18,15 +18,13 @@ async def test_disconnect_keeps_user_online_when_another_socket_exists(monkeypat
     main._room_disconnect_tasks.clear()
 
     handle_game_socket_disconnect = AsyncMock()
-    set_offline = AsyncMock()
-    broadcast_status = AsyncMock()
+    set_offline_and_emit = AsyncMock()
     schedule_cleanup = Mock()
 
     monkeypatch.setattr(
         main, "handle_game_socket_disconnect", handle_game_socket_disconnect
     )
-    monkeypatch.setattr(main, "set_offline", set_offline)
-    monkeypatch.setattr(main, "_broadcast_user_status", broadcast_status)
+    monkeypatch.setattr(main, "set_offline_and_emit", set_offline_and_emit)
     monkeypatch.setattr(main, "_schedule_room_disconnect_cleanup", schedule_cleanup)
     monkeypatch.setattr(
         main.User,
@@ -39,8 +37,7 @@ async def test_disconnect_keeps_user_online_when_another_socket_exists(monkeypat
 
         handle_game_socket_disconnect.assert_awaited_once_with(sid="sid-1", user_id=1)
         schedule_cleanup.assert_not_called()
-        set_offline.assert_not_awaited()
-        broadcast_status.assert_not_awaited()
+        set_offline_and_emit.assert_not_awaited()
         assert main._sid_to_user == {"sid-2": 1}
     finally:
         main._sid_to_user.clear()
@@ -59,15 +56,13 @@ async def test_disconnect_schedules_cleanup_for_last_socket(monkeypatch):
     main._room_disconnect_tasks.clear()
 
     handle_game_socket_disconnect = AsyncMock()
-    set_offline = AsyncMock()
-    broadcast_status = AsyncMock()
+    set_offline_and_emit = AsyncMock()
     schedule_cleanup = Mock()
 
     monkeypatch.setattr(
         main, "handle_game_socket_disconnect", handle_game_socket_disconnect
     )
-    monkeypatch.setattr(main, "set_offline", set_offline)
-    monkeypatch.setattr(main, "_broadcast_user_status", broadcast_status)
+    monkeypatch.setattr(main, "set_offline_and_emit", set_offline_and_emit)
     monkeypatch.setattr(main, "_schedule_room_disconnect_cleanup", schedule_cleanup)
     monkeypatch.setattr(
         main.User,
@@ -80,8 +75,11 @@ async def test_disconnect_schedules_cleanup_for_last_socket(monkeypatch):
 
         handle_game_socket_disconnect.assert_awaited_once_with(sid="sid-1", user_id=1)
         schedule_cleanup.assert_called_once_with(1)
-        set_offline.assert_awaited_once_with(user_id="1")
-        broadcast_status.assert_awaited_once_with(1, "guest", "offline")
+        set_offline_and_emit.assert_awaited_once_with(
+            main.sio,
+            user_id="1",
+            nickname="guest",
+        )
         assert main._sid_to_user == {}
     finally:
         main._sid_to_user.clear()

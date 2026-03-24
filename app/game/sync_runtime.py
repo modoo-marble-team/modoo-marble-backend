@@ -23,7 +23,7 @@ from app.game.rules import (
 )
 from app.game.state import delete_game_state, game_lock, get_game_state, save_game_state
 from app.game.timer import cancel_turn_timer
-from app.presence import update_status
+from app.presence import emit_online_users, update_status, update_status_and_emit
 from app.redis_client import get_redis
 from app.services.game_result_service import persist_game_result
 from app.services.room_service import RoomService
@@ -178,7 +178,12 @@ class GameSyncRuntime:
         ) is not None
         await self.clear_disconnected_at(game_id=game_id, player_id=user_id)
         await self._sio.enter_room(sid, f"game:{game_id}")
-        await update_status(user_id=str(user_id), status="playing")
+        await update_status_and_emit(
+            self._sio,
+            user_id=str(user_id),
+            status="playing",
+            emit_snapshot=True,
+        )
 
         current_revision = state.revision
         sync_event = {
@@ -1038,7 +1043,11 @@ class GameSyncRuntime:
         redis = get_redis()
         await redis.delete(self._legacy_user_game_key(player_id))
         if presence_status is not None:
-            await update_status(user_id=str(player_id), status=presence_status)
+            await update_status_and_emit(
+                self._sio,
+                user_id=str(player_id),
+                status=presence_status,
+            )
         if leave_socket_rooms:
             await self._leave_player_socket_rooms(
                 player_id=player_id,
@@ -1134,6 +1143,18 @@ class GameSyncRuntime:
                     {"action": "removed", "room": {"id": state.room_id}},
                 )
             else:
+                connected_player_ids_set = set(connected_player_ids)
+                for player in room["players"]:
+                    if int(player["id"]) not in connected_player_ids_set:
+                        continue
+                    await update_status_and_emit(
+                        self._sio,
+                        user_id=str(player["id"]),
+                        status="in_room",
+                        nickname=str(player["nickname"]),
+                        emit_snapshot=False,
+                    )
+                await emit_online_users(self._sio)
                 await self._sio.emit(
                     "lobby_updated",
                     {"action": "status_changed", "room": room_service.room_card(room)},
@@ -1151,8 +1172,6 @@ class GameSyncRuntime:
                 game_id=state.game_id,
                 player_id=player_id,
             )
-            if player_id in connected_player_ids:
-                await update_status(user_id=str(player_id), status="in_room")
 
         await delete_game_state(state.game_id)
         await redis.delete(self._patchlog_key(state.game_id))
