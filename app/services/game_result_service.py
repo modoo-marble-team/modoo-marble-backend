@@ -4,6 +4,7 @@ import structlog
 from tortoise.exceptions import OperationalError
 
 from app.game.models import GameState
+from app.game.rules import get_player_total_assets
 from app.models.game import Game
 from app.models.user_game import UserGame
 
@@ -13,7 +14,7 @@ logger = structlog.get_logger()
 def _compute_placements(state: GameState) -> dict[int, int]:
     sorted_players = sorted(
         state.players.values(),
-        key=lambda p: (-p.balance, p.turn_order),
+        key=lambda p: (-get_player_total_assets(state, p.player_id), p.turn_order),
     )
     return {p.player_id: i + 1 for i, p in enumerate(sorted_players)}
 
