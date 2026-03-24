@@ -33,16 +33,16 @@ async def test_join_room_existing_member_reconciles_finished_game_room(monkeypat
         **stale_room,
         "status": "waiting",
         "game_id": None,
-        "players": [
-            {**player, "is_ready": False} for player in stale_room["players"]
-        ],
+        "players": [{**player, "is_ready": False} for player in stale_room["players"]],
     }
 
     monkeypatch.setattr(service, "_require_room", AsyncMock(return_value=stale_room))
     monkeypatch.setattr(service, "_get_user", AsyncMock())
     monkeypatch.setattr(service, "_get_user_room_id", AsyncMock(return_value="room-1"))
     monkeypatch.setattr(service, "_set_user_room_id", AsyncMock())
-    monkeypatch.setattr(service, "finish_game_room", AsyncMock(return_value=cleaned_room))
+    monkeypatch.setattr(
+        service, "finish_game_room", AsyncMock(return_value=cleaned_room)
+    )
     monkeypatch.setattr(
         "app.services.room_service.get_game_state",
         AsyncMock(return_value=None),

@@ -164,7 +164,9 @@ async def test_handle_sync_includes_snapshot_for_initial_revision_zero(monkeypat
     async def fake_get_game_state(_game_id: str) -> GameState:
         return state
 
-    async def fake_update_status_and_emit(sio, *, user_id: str, status: str, emit_snapshot: bool = True) -> None:
+    async def fake_update_status_and_emit(
+        sio, *, user_id: str, status: str, emit_snapshot: bool = True
+    ) -> None:
         return None
 
     async def fake_set_active_game(*, user_id: int, game_id: str) -> None:

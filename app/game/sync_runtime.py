@@ -23,7 +23,7 @@ from app.game.rules import (
 )
 from app.game.state import delete_game_state, game_lock, get_game_state, save_game_state
 from app.game.timer import cancel_turn_timer
-from app.presence import emit_online_users, update_status, update_status_and_emit
+from app.presence import emit_online_users, update_status_and_emit
 from app.redis_client import get_redis
 from app.services.game_result_service import persist_game_result
 from app.services.room_service import RoomService
