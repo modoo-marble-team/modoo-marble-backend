@@ -5,7 +5,10 @@ from app.game.actions.roll_dice import process_roll_dice
 from app.game.board import BOARD, TILE_MAP
 from app.game.enums import PlayerState, ServerEventType, TileType
 from app.game.errors import GameActionError
-from app.game.game_rules import ACQUISITION_PRICE_MULTIPLIER, SELL_PURCHASE_PRICE_REFUND_RATIO
+from app.game.game_rules import (
+    ACQUISITION_PRICE_MULTIPLIER,
+    SELL_PURCHASE_PRICE_REFUND_RATIO,
+)
 from app.game.models import GameState, PlayerGameState, TileGameState
 from app.game.presentation import serialize_game_snapshot
 from app.game.rules import (

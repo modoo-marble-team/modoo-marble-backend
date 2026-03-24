@@ -6,11 +6,11 @@ from app.game.game_rules import MAX_ROUNDS
 from app.game.models import GameState
 from app.game.patch import op_set
 from app.game.rules import (
-    build_rankings_payload,
     PHASE_GAME_OVER,
     PHASE_RESOLVING,
     PHASE_WAIT_PROMPT,
     PHASE_WAIT_ROLL,
+    build_rankings_payload,
     find_winner_by_assets,
 )
 
