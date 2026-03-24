@@ -588,6 +588,7 @@ def _build_card_effect_context() -> CardEffectContext:
     return CardEffectContext(
         board_size=BOARD_SIZE,
         start_salary=START_SALARY,
+        max_building_level=MAX_BUILDING_LEVEL,
         apply_money_delta=lambda state, player_id, amount: _apply_money_delta(
             state,
             player_id=player_id,
