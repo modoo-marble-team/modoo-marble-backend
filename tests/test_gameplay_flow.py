@@ -119,9 +119,7 @@ def test_serialize_game_patch_always_includes_total_assets():
 
     assert packet["round"] == state.round
     total_asset_patches = [
-        patch
-        for patch in packet["patch"]
-        if patch["path"] == "players.1.totalAssets"
+        patch for patch in packet["patch"] if patch["path"] == "players.1.totalAssets"
     ]
 
     assert total_asset_patches == [

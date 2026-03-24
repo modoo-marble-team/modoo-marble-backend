@@ -142,12 +142,16 @@ async def test_build_and_store_patch_packet_preserves_patch_ops(monkeypatch):
     assert {"op": "set", "path": "players.1.currentTileId", "value": 4} in packet[
         "patch"
     ]
-    assert {"op": "set", "path": "players.1.totalAssets", "value": INITIAL_BALANCE} in packet[
-        "patch"
-    ]
-    assert {"op": "set", "path": "players.2.totalAssets", "value": INITIAL_BALANCE} in packet[
-        "patch"
-    ]
+    assert {
+        "op": "set",
+        "path": "players.1.totalAssets",
+        "value": INITIAL_BALANCE,
+    } in packet["patch"]
+    assert {
+        "op": "set",
+        "path": "players.2.totalAssets",
+        "value": INITIAL_BALANCE,
+    } in packet["patch"]
     assert stored == [("game-1", packet)]
 
 
