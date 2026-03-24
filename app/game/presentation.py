@@ -5,6 +5,7 @@ from typing import Any
 
 from app.game.board import BOARD
 from app.game.enums import PlayerState
+from app.game.game_rules import MAX_ROUNDS
 from app.game.models import GameState, PlayerGameState
 from app.game.rules import PHASE_GAME_OVER, get_player_total_assets, serialize_prompt
 from app.game.timer import TURN_TIMEOUT_SECONDS
@@ -46,6 +47,7 @@ NETWORK_KEY_MAP = {
 PATCH_PATH_MAP = {
     "current_tile_id": "currentTileId",
     "current_player_id": "currentPlayerId",
+    "total_assets": "totalAssets",
     "owned_tile_ids": "ownedTiles",
     "owned_tiles": "ownedTiles",
     "owner_id": "ownerId",
@@ -108,6 +110,17 @@ def _ordered_players(state: GameState) -> list[PlayerGameState]:
     return state.ordered_players()
 
 
+def _serialize_total_asset_patch_ops(state: GameState) -> list[dict[str, Any]]:
+    return [
+        {
+            "op": "set",
+            "path": f"players.{player.player_id}.totalAssets",
+            "value": get_player_total_assets(state, player.player_id),
+        }
+        for player in _ordered_players(state)
+    ]
+
+
 def serialize_game_snapshot(state: GameState) -> dict[str, Any]:
     tiles = []
     for tile in BOARD:
@@ -156,6 +169,7 @@ def serialize_game_snapshot(state: GameState) -> dict[str, Any]:
         "tiles": tiles,
         "currentPlayerId": str(state.current_player_id),
         "round": state.round,
+        "maxRounds": MAX_ROUNDS,
         "turnTimeoutSec": TURN_TIMEOUT_SECONDS,
         "prompt": serialize_prompt(state.pending_prompt),
         "isGameOver": state.status != "playing",
@@ -170,11 +184,14 @@ def serialize_game_patch(
     patches: list[dict] | None = None,
     include_snapshot: bool = True,
 ) -> dict[str, Any]:
+    serialized_patch_ops = _serialize_patch_ops(patches)
+    serialized_patch_ops.extend(_serialize_total_asset_patch_ops(state))
     return {
         "gameId": state.game_id,
         "revision": state.revision,
         "turn": state.turn,
+        "round": state.round,
         "events": [_normalize_payload(event) for event in events],
-        "patch": _serialize_patch_ops(patches),
+        "patch": serialized_patch_ops,
         "snapshot": serialize_game_snapshot(state) if include_snapshot else None,
     }

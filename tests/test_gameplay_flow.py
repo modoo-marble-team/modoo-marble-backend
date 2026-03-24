@@ -10,7 +10,7 @@ from app.game.game_rules import (
     SELL_PURCHASE_PRICE_REFUND_RATIO,
 )
 from app.game.models import GameState, PlayerGameState, TileGameState
-from app.game.presentation import serialize_game_snapshot
+from app.game.presentation import serialize_game_patch, serialize_game_snapshot
 from app.game.rules import (
     process_city_build_action,
     process_prompt_response,
@@ -100,6 +100,37 @@ def test_minimum_gameplay_turn_rotation(monkeypatch):
     assert snapshot["players"][0]["currentTileId"] == 3
     assert snapshot["currentPlayerId"] == "2"
     assert snapshot["round"] == 1
+    assert snapshot["maxRounds"] == MAX_ROUNDS
+
+
+def test_serialize_game_patch_always_includes_total_assets():
+    state = make_state()
+    state.require_player(1).balance = INITIAL_BALANCE + 10000
+    state.require_player(1).owned_tiles = [1]
+    state.tiles[1] = TileGameState(owner_id=1, building_level=1)
+    tile = TILE_MAP[1]
+
+    packet = serialize_game_patch(
+        state,
+        events=[],
+        patches=[{"op": "set", "path": "phase", "value": "RESOLVING"}],
+        include_snapshot=False,
+    )
+
+    assert packet["round"] == state.round
+    total_asset_patches = [
+        patch
+        for patch in packet["patch"]
+        if patch["path"] == "players.1.totalAssets"
+    ]
+
+    assert total_asset_patches == [
+        {
+            "op": "set",
+            "path": "players.1.totalAssets",
+            "value": INITIAL_BALANCE + 10000 + tile.price + tile.build_costs[0],
+        }
+    ]
 
 
 def test_locked_player_is_released_after_two_failed_turns(monkeypatch):

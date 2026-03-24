@@ -17,6 +17,7 @@ class GamePatch(TypedDict):
     game_id: str
     revision: int
     turn: int
+    round: int
     events: list[dict[str, Any]]
     patch: list[ServerPatchOperation]
     snapshot: GameState | None
