@@ -398,12 +398,24 @@ class GameSyncRuntime:
     async def leave_game(self, *, game_id: str, user_id: int) -> bool:
         async with game_lock(game_id):
             state = await get_game_state(game_id)
-            if state is None or state.status != "playing":
+            if state is None:
                 return False
 
             player = state.player(user_id)
             if player is None:
                 return False
+
+            # 게임이 이미 종료된 상태라면 멤버십만 정리하고 성공 반환.
+            # GAME_OVER 이후 finalize 완료 전에 나가기 요청이 들어올 수 있다.
+            if state.status != "playing":
+                await self._cleanup_player_game_membership(
+                    game_id=game_id,
+                    room_id=state.room_id,
+                    player_id=user_id,
+                    presence_status="lobby",
+                    leave_socket_rooms=True,
+                )
+                return True
 
             if player.player_state == PlayerState.BANKRUPT:
                 await self._cleanup_player_game_membership(
