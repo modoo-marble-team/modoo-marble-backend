@@ -145,11 +145,27 @@ async def _handle_room_disconnect(user_id: int) -> None:
     try:
         room_id = await room_service._get_user_room_id(user_id)
         if room_id is None:
+            logger.info("room_disconnect_no_room", user_id=user_id)
             return
 
         room = await room_service.get_room(room_id)
-        if room is None or room.get("status") != "waiting":
+        if room is None:
+            logger.warning(
+                "room_disconnect_room_missing_in_redis",
+                user_id=user_id,
+                room_id=room_id,
+            )
             return
+        if room.get("status") != "waiting":
+            logger.warning(
+                "room_disconnect_skip_non_waiting",
+                user_id=user_id,
+                room_id=room_id,
+                room_status=room.get("status"),
+            )
+            return
+
+        logger.info("room_disconnect_proceeding", user_id=user_id, room_id=room_id)
 
         room, new_host_id = await room_service.leave_room(
             room_id=room_id, user_id=user_id

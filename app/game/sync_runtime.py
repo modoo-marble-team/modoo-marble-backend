@@ -1131,6 +1131,16 @@ class GameSyncRuntime:
         cancel_turn_timer(state.game_id)
         room = await room_service.finish_game_room(room_id=state.room_id)
 
+        logger.info(
+            "finalize_finished_game",
+            game_id=state.game_id,
+            room_id=state.room_id,
+            all_player_ids=player_ids,
+            connected_player_ids=connected_player_ids,
+            excluded_player_ids=list(excluded),
+            room_exists=room is not None,
+        )
+
         if room is not None:
             if not connected_player_ids:
                 await room_service.cleanup_abandoned_room(
