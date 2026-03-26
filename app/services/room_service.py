@@ -4,15 +4,18 @@ import json
 from datetime import UTC, datetime
 from uuid import uuid4
 
+import structlog
+
 from app.errors import ApiError
 from app.game.models import GameState
-from app.game.state import init_game_state
+from app.game.state import get_game_state, init_game_state
 from app.models.game import Game
 from app.models.user import User
 from app.models.user_game import UserGame
-from app.presence import update_status
 from app.redis_client import get_redis
 from app.utils.redis_keys import RedisKeys
+
+logger = structlog.get_logger()
 
 ROOM_TTL_SECONDS = 60 * 60 * 24
 MAX_CHAT_MESSAGES = 100
@@ -23,6 +26,22 @@ def _now_iso() -> str:
 
 
 class RoomService:
+    async def _reconcile_existing_member_room(self, room: dict) -> dict:
+        if room.get("status") != "playing":
+            return room
+
+        game_id = str(room.get("game_id") or "")
+        if not game_id:
+            finished_room = await self.finish_game_room(room_id=str(room["id"]))
+            return finished_room or room
+
+        game_state = await get_game_state(game_id)
+        if game_state is not None and game_state.status == "playing":
+            return room
+
+        finished_room = await self.finish_game_room(room_id=str(room["id"]))
+        return finished_room or room
+
     async def _get_user(self, user_id: int) -> User:
         user = await User.get_or_none(id=user_id, deleted_at__isnull=True)
         if not user:
@@ -43,8 +62,11 @@ class RoomService:
 
     async def _delete_room(self, room_id: str) -> None:
         redis = get_redis()
+        logger.info("room_delete_start", room_id=room_id)
         await redis.delete(RedisKeys.room(room_id))
+        logger.info("room_delete_key_done", room_id=room_id)
         await redis.srem(RedisKeys.rooms_index(), room_id)
+        logger.info("room_delete_index_done", room_id=room_id)
 
     async def get_room(self, room_id: str) -> dict | None:
         redis = get_redis()
@@ -221,7 +243,7 @@ class RoomService:
         for player in room["players"]:
             if player["id"] == str(user_id):
                 await self._set_user_room_id(user_id, room_id)
-                return room
+                return await self._reconcile_existing_member_room(room)
 
         if room["status"] != "waiting":
             raise ApiError(
@@ -275,11 +297,23 @@ class RoomService:
         room["players"] = [
             existing for existing in room["players"] if existing["id"] != player["id"]
         ]
+        logger.info(
+            "room_leave_player_removed",
+            room_id=room_id,
+            user_id=user_id,
+            remaining_players=[p["id"] for p in room["players"]],
+            room_status=room.get("status"),
+        )
         await self._clear_user_room_id(user_id)
+        logger.info("room_leave_user_room_cleared", room_id=room_id, user_id=user_id)
 
         new_host_id: str | None = None
         if not room["players"]:
+            logger.info(
+                "room_leave_last_player_deleting", room_id=room_id, user_id=user_id
+            )
             await self._delete_room(room_id)
+            logger.info("room_leave_deleted", room_id=room_id, user_id=user_id)
             return None, None
 
         if player["is_host"]:
@@ -394,10 +428,6 @@ class RoomService:
                 str(game.id),
                 ex=ROOM_TTL_SECONDS,
             )
-
-        # 참여 플레이어 presence 상태를 "playing"으로 업데이트
-        for player_id in player_ids:
-            await update_status(user_id=str(player_id), status="playing")
 
         room["status"] = "playing"
         room["game_id"] = str(game.id)

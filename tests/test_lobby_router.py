@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from app.game.enums import PlayerState
 from app.game.models import GameState, PlayerGameState
@@ -84,8 +85,12 @@ def test_start_room_game_accepts_object_game_state(monkeypatch):
         assert action == "status_changed"
         assert payload_room is room
 
+    update_status_and_emit = AsyncMock()
+    emit_online_users = AsyncMock()
     monkeypatch.setattr(lobby.room_service, "start_game", fake_start_game)
     monkeypatch.setattr(lobby, "_emit_lobby_updated", fake_emit_lobby_updated)
+    monkeypatch.setattr(lobby, "update_status_and_emit", update_status_and_emit)
+    monkeypatch.setattr(lobby, "emit_online_users", emit_online_users)
     monkeypatch.setattr(
         lobby,
         "start_turn_timer",
@@ -96,6 +101,8 @@ def test_start_room_game_accepts_object_game_state(monkeypatch):
 
     assert result == {"success": True, "game_id": "game-1"}
     assert start_timer_calls == [("game-1", sio)]
+    assert update_status_and_emit.await_count == 2
+    emit_online_users.assert_awaited_once_with(sio)
     assert any(
         item["event"] == "game_start"
         and item["room"] == "room:room-1"
@@ -170,3 +177,87 @@ def test_get_room_snapshot_returns_snapshot_for_member(monkeypatch):
     assert result["room_id"] == "room-1"
     assert result["status"] == "waiting"
     assert len(result["players"]) == 2
+
+
+def test_join_room_updates_presence_to_in_room(monkeypatch):
+    sio = FakeSio()
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(sio=sio)))
+    auth = SimpleNamespace(user_id=2)
+    room = {
+        "id": "room-1",
+        "title": "테스트 방",
+        "status": "waiting",
+        "max_players": 4,
+        "is_private": False,
+        "players": [
+            {"id": "1", "nickname": "host", "is_host": True, "is_ready": False},
+            {"id": "2", "nickname": "guest", "is_host": False, "is_ready": False},
+        ],
+        "chat_messages": [],
+    }
+
+    update_status_and_emit = AsyncMock()
+    monkeypatch.setattr(
+        lobby.room_service,
+        "join_room",
+        AsyncMock(return_value=room),
+    )
+    monkeypatch.setattr(lobby, "update_status_and_emit", update_status_and_emit)
+    monkeypatch.setattr(lobby, "_emit_lobby_updated", AsyncMock())
+    monkeypatch.setattr(lobby, "_emit_room_updated", AsyncMock())
+
+    result = asyncio.run(lobby.join_room("room-1", request, None, auth))
+
+    assert result["room_id"] == "room-1"
+    update_status_and_emit.assert_awaited_once_with(
+        sio,
+        user_id="2",
+        status="in_room",
+        nickname="guest",
+    )
+
+
+def test_leave_room_updates_presence_to_lobby_before_response(monkeypatch):
+    sio = FakeSio()
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(sio=sio)))
+    auth = SimpleNamespace(user_id=2)
+    room = {
+        "id": "room-1",
+        "status": "waiting",
+        "players": [
+            {"id": "1", "nickname": "host", "is_host": True, "is_ready": False},
+            {"id": "2", "nickname": "guest", "is_host": False, "is_ready": False},
+        ],
+    }
+    updated_room = {
+        "id": "room-1",
+        "title": "테스트 방",
+        "status": "waiting",
+        "max_players": 4,
+        "is_private": False,
+        "players": [
+            {"id": "1", "nickname": "host", "is_host": True, "is_ready": False},
+        ],
+        "chat_messages": [],
+    }
+
+    update_status_and_emit = AsyncMock()
+    monkeypatch.setattr(lobby.room_service, "get_room", AsyncMock(return_value=room))
+    monkeypatch.setattr(
+        lobby.room_service,
+        "leave_room",
+        AsyncMock(return_value=(updated_room, None)),
+    )
+    monkeypatch.setattr(lobby, "update_status_and_emit", update_status_and_emit)
+    monkeypatch.setattr(lobby, "_emit_lobby_updated", AsyncMock())
+    monkeypatch.setattr(lobby, "_emit_room_updated", AsyncMock())
+
+    result = asyncio.run(lobby.leave_room("room-1", request, auth))
+
+    assert result == {"success": True, "new_host_id": None}
+    update_status_and_emit.assert_awaited_once_with(
+        sio,
+        user_id="2",
+        status="lobby",
+        nickname="guest",
+    )

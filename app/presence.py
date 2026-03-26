@@ -35,6 +35,89 @@ async def set_offline(*, user_id: str) -> None:
     await redis.hdel(_PRESENCE_KEY, user_id)
 
 
+async def emit_user_status_changed(
+    sio,
+    *,
+    user_id: str,
+    nickname: str,
+    status: str,
+) -> None:
+    await sio.emit(
+        "user_status_changed",
+        {
+            "id": user_id,
+            "nickname": nickname,
+            "status": status,
+        },
+    )
+
+
+async def emit_online_users(sio) -> None:
+    await sio.emit("online_users", {"users": await list_online()})
+
+
+async def update_status_and_emit(
+    sio,
+    *,
+    user_id: str,
+    status: str,
+    nickname: str | None = None,
+    emit_snapshot: bool = True,
+) -> None:
+    await update_status(user_id=user_id, status=status)
+
+    info = await get_user_info(user_id)
+    resolved_nickname = nickname or str((info or {}).get("nickname") or "")
+    if not resolved_nickname:
+        return
+
+    await emit_user_status_changed(
+        sio,
+        user_id=user_id,
+        nickname=resolved_nickname,
+        status=status,
+    )
+    if emit_snapshot:
+        await emit_online_users(sio)
+
+
+async def set_online_and_emit(
+    sio,
+    *,
+    user_id: str,
+    nickname: str,
+    status: str = "lobby",
+    emit_snapshot: bool = True,
+) -> None:
+    await set_online(user_id=user_id, nickname=nickname, status=status)
+    await emit_user_status_changed(
+        sio,
+        user_id=user_id,
+        nickname=nickname,
+        status=status,
+    )
+    if emit_snapshot:
+        await emit_online_users(sio)
+
+
+async def set_offline_and_emit(
+    sio,
+    *,
+    user_id: str,
+    nickname: str,
+    emit_snapshot: bool = True,
+) -> None:
+    await set_offline(user_id=user_id)
+    await emit_user_status_changed(
+        sio,
+        user_id=user_id,
+        nickname=nickname,
+        status="offline",
+    )
+    if emit_snapshot:
+        await emit_online_users(sio)
+
+
 async def list_online() -> list[dict[str, Any]]:
     redis = get_redis()
     users_data = await redis.hvals(_PRESENCE_KEY)

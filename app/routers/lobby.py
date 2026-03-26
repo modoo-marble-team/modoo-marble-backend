@@ -6,6 +6,7 @@ from app.errors import ApiError
 from app.game.presentation import serialize_game_snapshot
 from app.game.sync_runtime import leave_game_for_user
 from app.game.timer import start_turn_timer
+from app.presence import emit_online_users, update_status_and_emit
 from app.schemas.lobby import (
     CreateRoomRequest,
     JoinRoomRequest,
@@ -94,6 +95,13 @@ async def create_room(
         password=payload.password,
         max_players=payload.max_players,
     )
+    host = room["players"][0]
+    await update_status_and_emit(
+        request.app.state.sio,
+        user_id=str(auth.user_id),
+        status="in_room",
+        nickname=str(host["nickname"]),
+    )
     await _emit_lobby_updated(request, "created", room)
     return room_service.room_card(room)
 
@@ -110,6 +118,16 @@ async def join_room(
         user_id=auth.user_id,
         password=payload.password if payload else None,
     )
+    if room["status"] == "waiting":
+        member = next(
+            player for player in room["players"] if player["id"] == str(auth.user_id)
+        )
+        await update_status_and_emit(
+            request.app.state.sio,
+            user_id=str(auth.user_id),
+            status="in_room",
+            nickname=str(member["nickname"]),
+        )
     await _emit_lobby_updated(request, "updated", room)
     await _emit_room_updated(request, room)
     return room_service.room_snapshot(room)
@@ -172,6 +190,12 @@ async def leave_room(
         room_id=room_id,
         user_id=auth.user_id,
     )
+    await update_status_and_emit(
+        request.app.state.sio,
+        user_id=str(auth.user_id),
+        status="lobby",
+        nickname=str(member["nickname"]),
+    )
     if room is None:
         await request.app.state.sio.emit(
             "lobby_updated",
@@ -229,6 +253,15 @@ async def start_room_game(
         room_id=room_id,
         user_id=auth.user_id,
     )
+    for player in room["players"]:
+        await update_status_and_emit(
+            request.app.state.sio,
+            user_id=str(player["id"]),
+            status="playing",
+            nickname=str(player["nickname"]),
+            emit_snapshot=False,
+        )
+    await emit_online_users(request.app.state.sio)
     await _emit_lobby_updated(request, "status_changed", room)
     start_turn_timer(game_state.game_id, request.app.state.sio)
 

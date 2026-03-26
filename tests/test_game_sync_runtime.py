@@ -550,7 +550,8 @@ async def test_finalize_finished_game_keeps_room_and_clears_game_keys(monkeypatc
     clear_active_game = AsyncMock()
     clear_disconnected_at = AsyncMock()
     delete_game_state = AsyncMock()
-    update_status = AsyncMock()
+    update_status_and_emit = AsyncMock()
+    emit_online_users = AsyncMock()
     cancel_turn_timer = Mock()
 
     monkeypatch.setattr("app.game.sync_runtime.get_redis", lambda: FakeRedis())
@@ -567,8 +568,12 @@ async def test_finalize_finished_game_keeps_room_and_clears_game_keys(monkeypatc
         cancel_turn_timer,
     )
     monkeypatch.setattr(
-        "app.game.sync_runtime.update_status",
-        update_status,
+        "app.game.sync_runtime.update_status_and_emit",
+        update_status_and_emit,
+    )
+    monkeypatch.setattr(
+        "app.game.sync_runtime.emit_online_users",
+        emit_online_users,
     )
     monkeypatch.setattr(runtime, "clear_active_game", clear_active_game)
     monkeypatch.setattr(runtime, "clear_disconnected_at", clear_disconnected_at)
@@ -589,7 +594,14 @@ async def test_finalize_finished_game_keeps_room_and_clears_game_keys(monkeypatc
     clear_active_game.assert_any_await(user_id=2)
     clear_disconnected_at.assert_any_await(game_id="game-1", player_id=1)
     clear_disconnected_at.assert_any_await(game_id="game-1", player_id=2)
-    update_status.assert_awaited_once_with(user_id="1", status="in_room")
+    update_status_and_emit.assert_awaited_once_with(
+        sio,
+        user_id="1",
+        status="in_room",
+        nickname="host",
+        emit_snapshot=False,
+    )
+    emit_online_users.assert_awaited_once_with(sio)
     assert sio.emit.await_args_list[0].args == (
         "lobby_updated",
         {
@@ -654,7 +666,7 @@ async def test_finalize_finished_game_cleans_up_room_when_nobody_connected(monke
     clear_active_game = AsyncMock()
     clear_disconnected_at = AsyncMock()
     delete_game_state = AsyncMock()
-    update_status = AsyncMock()
+    update_status_and_emit = AsyncMock()
     cancel_turn_timer = Mock()
 
     monkeypatch.setattr("app.game.sync_runtime.get_redis", lambda: FakeRedis())
@@ -675,8 +687,8 @@ async def test_finalize_finished_game_cleans_up_room_when_nobody_connected(monke
         cancel_turn_timer,
     )
     monkeypatch.setattr(
-        "app.game.sync_runtime.update_status",
-        update_status,
+        "app.game.sync_runtime.update_status_and_emit",
+        update_status_and_emit,
     )
     monkeypatch.setattr(runtime, "clear_active_game", clear_active_game)
     monkeypatch.setattr(runtime, "clear_disconnected_at", clear_disconnected_at)
@@ -696,7 +708,7 @@ async def test_finalize_finished_game_cleans_up_room_when_nobody_connected(monke
     assert "game:game-1:patchlog" in deleted_keys
     assert "user:1:game" in deleted_keys
     assert "user:2:game" in deleted_keys
-    update_status.assert_not_awaited()
+    update_status_and_emit.assert_not_awaited()
     assert sio.emit.await_args_list[0].args == (
         "lobby_updated",
         {"action": "removed", "room": {"id": "room-1"}},

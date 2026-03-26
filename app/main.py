@@ -22,7 +22,7 @@ from app.game.sync_runtime import (
 )
 from app.lobby.socket_handlers import register_lobby_handlers
 from app.models.user import User
-from app.presence import set_offline, set_online
+from app.presence import set_offline_and_emit, set_online_and_emit
 from app.redis_client import close_redis, init_redis
 from app.routers import auth, game, lobby, users
 from app.utils.jwt import decode_token
@@ -40,17 +40,6 @@ _room_disconnect_tasks: dict[int, asyncio.Task[None]] = {}
 register_game_handlers(sio, _sid_to_user)
 register_lobby_handlers(sio, _sid_to_user)
 register_dm_handlers(sio, _sid_to_user)
-
-
-async def _broadcast_user_status(user_id: int, nickname: str, status: str) -> None:
-    await sio.emit(
-        "user_status_changed",
-        {
-            "id": user_id,
-            "nickname": nickname,
-            "status": status,
-        },
-    )
 
 
 def _cancel_room_disconnect_cleanup(user_id: int) -> None:
@@ -105,9 +94,13 @@ async def connect(sid: str, environ: dict, auth_data: dict | None):
         _sid_to_user[sid] = int(user.id)
         await handle_game_socket_connect(sid=sid, user_id=int(user.id))
 
-        await set_online(user_id=str(user.id), nickname=user.nickname, status="lobby")
+        await set_online_and_emit(
+            sio,
+            user_id=str(user.id),
+            nickname=user.nickname,
+            status="lobby",
+        )
         await sio.enter_room(sid, f"user:{user.id}")
-        await _broadcast_user_status(int(user.id), user.nickname, "lobby")
         return True
     except ConnectionRefusedError as e:
         raise e
@@ -133,8 +126,11 @@ async def disconnect(sid: str):
             )
             if not has_other_socket:
                 _schedule_room_disconnect_cleanup(int(user_id))
-                await set_offline(user_id=str(user_id))
-                await _broadcast_user_status(int(user_id), nickname, "offline")
+                await set_offline_and_emit(
+                    sio,
+                    user_id=str(user_id),
+                    nickname=nickname,
+                )
     except Exception:
         pass
     finally:
@@ -149,11 +145,27 @@ async def _handle_room_disconnect(user_id: int) -> None:
     try:
         room_id = await room_service._get_user_room_id(user_id)
         if room_id is None:
+            logger.info("room_disconnect_no_room", user_id=user_id)
             return
 
         room = await room_service.get_room(room_id)
-        if room is None or room.get("status") != "waiting":
+        if room is None:
+            logger.warning(
+                "room_disconnect_room_missing_in_redis",
+                user_id=user_id,
+                room_id=room_id,
+            )
             return
+        if room.get("status") != "waiting":
+            logger.warning(
+                "room_disconnect_skip_non_waiting",
+                user_id=user_id,
+                room_id=room_id,
+                room_status=room.get("status"),
+            )
+            return
+
+        logger.info("room_disconnect_proceeding", user_id=user_id, room_id=room_id)
 
         room, new_host_id = await room_service.leave_room(
             room_id=room_id, user_id=user_id

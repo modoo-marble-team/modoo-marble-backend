@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import socketio
 
-from app.presence import update_status
 from app.services.room_service import RoomService
 
 
@@ -43,16 +42,12 @@ def register_lobby_handlers(
             return
 
         await sio.enter_room(sid, f"room:{room_id}")
-        await update_status(user_id=str(user_id), status="in_room")
 
     @sio.on("leave_room")
     async def leave_room(sid: str, data: dict) -> None:
-        user_id = sid_to_user.get(sid)
         room_id = str(data.get("room_id") or "")
         if room_id:
             await sio.leave_room(sid, f"room:{room_id}")
-        if user_id is not None:
-            await update_status(user_id=str(user_id), status="lobby")
 
     @sio.on("send_chat")
     async def send_chat(sid: str, data: dict) -> None:
